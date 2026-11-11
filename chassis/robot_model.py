@@ -104,6 +104,20 @@ def _report(p, sel, what):
                 z=round(float(hits[i, 2]), 3))
 
 
+def turn_hits(p, cfg, yaw, phase='carry', step_deg=0.5):
+    """Turning in place by `yaw` rad only (e.g. a 1-degree alignment): checks the arc actually swept,
+    sampled every step_deg, instead of the full circle used by rotation_hits."""
+    m = cfg['margin']; p = remove_self(p, cfg, phase); hit = np.zeros(len(p), bool)
+    k = max(1, int(math.ceil(abs(math.degrees(yaw)) / step_deg)))
+    for i in range(k + 1):
+        a = -yaw * i / k                       # robot turns by +a  ->  the world turns by -a in the robot frame
+        c, s = math.cos(a), math.sin(a)
+        q = np.stack([c * p[:, 0] - s * p[:, 1], s * p[:, 0] + c * p[:, 1], p[:, 2]], 1)
+        for _, b in boxes(cfg, phase):
+            hit |= _inside(q, b, m)
+    return _report(p, hit, 'turn %.1f deg' % math.degrees(yaw))
+
+
 def rotation_hits(p, cfg, phase='carry'):
     """Turning in place sweeps each box through a circle: any obstacle inside that circle, in that box's
     height band, is a collision.  None when clear, else the nearest offending point."""

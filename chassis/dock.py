@@ -102,6 +102,10 @@ def move_to_turn_spot(max_d=0.30):
 
 
 def safe_rotate(yaw):
+    """Small alignment turns are checked over the arc actually swept; larger ones need a clear full circle."""
+    if abs(yaw) <= math.radians(12) and not RM.turn_hits(cloud(), CFG, yaw):
+        rel(0.0, yaw)
+        return
     move_to_turn_spot()
     rel(0.0, yaw)
 
@@ -172,19 +176,29 @@ def _wait_state(pred, timeout):
 
 
 def setmode(v):
+    if v == 0:
+        _PARK_OK[0] = False                     # in auto mode the chassis parks by itself
     c = _client('srv', SetControlMode, 'move/SetControlMode'); c.wait_for_service(timeout_sec=5)
     r = SetControlMode.Request(); r.mode = v; f = c.call_async(r)
     rclpy.spin_until_future_complete(n, f, timeout_sec=5)
     _wait_state(lambda s: s.is_soft_auto == (v == 0), 1.0)     # instead of a fixed 0.8 s pause
 
 
-def unpark():
-    if S[0] is not None and not S[0].is_parking_mode:
+_PARK_OK = [False]   # parking released by us and nothing (navigation / auto mode) re-engaged it since
+
+
+def unpark(force=False):
+    """Release parking.  The chassis re-engages parking by itself after navigation, and the release waits for
+    the wheels to zero (~0.7 s; a relative move sent earlier is rejected), so release unless we did it right
+    before the previous relative move and nothing else has run since."""
+    if not force and _PARK_OK[0] and S[0] is not None and not S[0].is_parking_mode and not S[0].is_soft_auto:
         return
     c = _client('srv', SetParkingMode, 'move/SetParkingMode'); c.wait_for_service(timeout_sec=5)
     r = SetParkingMode.Request(); r.enable = False; f = c.call_async(r)
     rclpy.spin_until_future_complete(n, f, timeout_sec=5)
-    _wait_state(lambda s: not s.is_parking_mode, 0.6)
+    _wait_state(lambda s: not s.is_parking_mode, 2.0)
+    spin(0.8)                                   # wheels to zero ("Parking release completed")
+    _PARK_OK[0] = True
 
 
 def rel(x=0.0, yaw=0.0, rear_check=False, y=0.0):
@@ -198,9 +212,15 @@ def rel(x=0.0, yaw=0.0, rear_check=False, y=0.0):
     g = MoveRelative.Goal()
     g.relative_pose.position.x = float(x); g.relative_pose.position.y = float(y)
     g.relative_pose.orientation.w = float(yaw)        # vendor convention: w = yaw (rad)
-    gf = ac.send_goal_async(g); rclpy.spin_until_future_complete(n, gf, timeout_sec=5); gh = gf.result()
-    if not gh or not gh.accepted:
-        raise SystemExit('ABORT: relative move rejected')
+    for attempt in range(4):
+        gf = ac.send_goal_async(g); rclpy.spin_until_future_complete(n, gf, timeout_sec=5); gh = gf.result()
+        if gh and gh.accepted:
+            break
+        # typically "parking mode enabled": releasing parking waits for the wheels to zero (~0.7 s)
+        log('  relative move rejected (attempt %d) - releasing parking and retrying' % (attempt + 1))
+        spin(0.5); unpark(force=True); spin(0.3)
+    else:
+        raise SystemExit('ABORT: relative move rejected (check parking / soft mode)')
     rf = gh.get_result_async(); t0 = time.time()
     while not rf.done() and time.time() - t0 < 60:
         rclpy.spin_once(n, timeout_sec=0.05)
@@ -317,6 +337,7 @@ def approach(gap, dry, align_only=False):
 
 def nav_task(st):
     """Submit the vendor navigation task to the station's staging point (in-process, NAV_SPEED)."""
+    _PARK_OK[0] = False                         # navigation ends in parking mode
     from server.srv import CreateTaskById, CreateTaskByPose
     from server.msg import TargetInfoWithId, TargetInfoWithPose
     if 'staging_pose' in st:
