@@ -1,0 +1,10 @@
+[Unit]
+Description=Run the Gento boot check 120 s after every boot
+
+[Timer]
+OnBootSec=120
+AccuracySec=5s
+Unit=gento-boot-check.service
+
+[Install]
+WantedBy=timers.target

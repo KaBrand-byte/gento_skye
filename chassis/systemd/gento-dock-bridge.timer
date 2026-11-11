@@ -1,0 +1,9 @@
+[Unit]
+Description=Make sure the Gento docking bridge is running 90 s after boot
+
+[Timer]
+OnBootSec=90
+Unit=gento-dock-bridge.service
+
+[Install]
+WantedBy=timers.target
