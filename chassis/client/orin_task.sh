@@ -29,7 +29,13 @@ case "${1:-start}" in
     shift
     # tmux needs a usable terminal type (Windows ssh -t may send none or one the Orin does not know)
     if [ -z "$TERM" ] || [ "$TERM" = dumb ] || ! infocmp "$TERM" >/dev/null 2>&1; then export TERM=xterm-256color; fi
-    if tmux has-session -t $SESSION 2>/dev/null; then echo "task already running - attaching"; exec tmux attach -t $SESSION; fi
+    if tmux has-session -t $SESSION 2>/dev/null; then
+      if pgrep -f "^python3 chassis/client/run_task_with_navigation.py" >/dev/null; then
+        echo "task already running - attaching"; exec tmux attach -t $SESSION
+      fi
+      echo "previous task window had finished - closing it and starting a new task"
+      tmux kill-session -t $SESSION
+    fi
     ARGS=""; [ $# -gt 0 ] && ARGS=$(printf '%q ' "$@")      # no args: forward nothing (printf would emit '')
     tmux new-session -s $SESSION "bash '$REPO/chassis/client/orin_task.sh' run $ARGS" ;;
   attach)
