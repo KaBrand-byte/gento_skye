@@ -53,21 +53,33 @@ def spin(t):
         rclpy.spin_once(n, timeout_sec=0.05)
 
 
+T0 = time.time()
+FRAMES = 6                     # lidar frames per snapshot (10 Hz)
+NAV_SPEED = float(os.environ.get('GENTO_NAV_SPEED', '0.35'))   # vendor max_speed.linear is 0.35 m/s
+MOVES = [0]                    # incremented by every relative move: invalidates the cloud cache
+_CACHE = {'moves': -1, 't': 0.0, 'a': None}
+
+
 def log(*a):
-    print(*a, flush=True)
+    print('[%6.1fs]' % (time.time() - T0), *a, flush=True)
 
 
 def pub(m):
     return json.dumps({k: v for k, v in m.items() if k not in ('err', 'runs')}) if m else 'no face'
 
 
-def cloud():
-    C.clear(); spin(0.3); C.clear(); t = time.time()
-    while len(C) < 8 and time.time() - t < 4:
+def cloud(fresh=False):
+    """Lidar snapshot (base_link).  Reused while the robot has not moved since and it is < 2 s old."""
+    if not fresh and _CACHE['moves'] == MOVES[0] and time.time() - _CACHE['t'] < 2.0:
+        return _CACHE['a']
+    C.clear(); spin(0.15); C.clear(); t = time.time()
+    while len(C) < FRAMES and time.time() - t < 4:
         rclpy.spin_once(n, timeout_sec=0.05)
     a = np.concatenate([np.stack([s['x'], s['y'], s['z']], 1).astype(float)
-                        for s in (pc2.read_points(m, field_names=('x', 'y', 'z'), skip_nans=True) for m in C)])
-    return a[np.isfinite(a).all(1)]
+                        for s in (pc2.read_points(m, field_names=('x', 'y', 'z'), skip_nans=True) for m in list(C))])
+    a = a[np.isfinite(a).all(1)]
+    _CACHE.update(moves=MOVES[0], t=time.time(), a=a)
+    return a
 
 
 def need_clear(h, what):
@@ -78,14 +90,14 @@ def need_clear(h, what):
 def move_to_turn_spot(max_d=0.30):
     """If turning here would hit something (chassis, torso, arms or tray), make the shortest collision-free
     straight move (back / sideways / diagonal-back) after which turning is clear.  Re-checks after moving."""
-    for _ in range(3):
-        p = cloud(); mv = RM.leave_move(p, CFG, max_d)
+    for _ in range(2):
+        p = cloud(); mv = RM.leave_move(p, CFG, max_d)      # exact shortest move, computed in one pass
         if mv is None:
             raise SystemExit('ABORT: no clear spot to turn within %.2f m: %s' % (max_d, json.dumps(RM.rotation_hits(p, CFG))))
         if mv == (0.0, 0.0):
             return
         log('turning here would hit %s: move straight x=%.2f y=%.2f first' % (json.dumps(RM.rotation_hits(p, CFG)), mv[0], mv[1]))
-        rel(mv[0], 0.0, rear_check=mv[0] < 0, y=mv[1])     # never more than the checked move; loop re-checks
+        rel(mv[0], 0.0, rear_check=mv[0] < 0, y=mv[1])     # never more than the checked move; re-checked
     need_clear(RM.rotation_hits(cloud(), CFG), 'turning (still blocked after moving)')
 
 
@@ -95,12 +107,7 @@ def safe_rotate(yaw):
 
 
 def measure(near=False):
-    C.clear(); spin(0.3); C.clear(); t = time.time()
-    while len(C) < 8 and time.time() - t < 4:
-        rclpy.spin_once(n, timeout_sec=0.05)
-    a = np.concatenate([np.stack([s['x'], s['y'], s['z']], 1).astype(float)
-                        for s in (pc2.read_points(m, field_names=('x', 'y', 'z'), skip_nans=True) for m in C)])
-    a = a[np.isfinite(a).all(1)]
+    a = cloud(fresh=True)
     if near:   # exclude the gripper zone only if the fit band reaches gripper height
         sel = (a[:, 0] > FRONT + 0.02) & (a[:, 0] < 1.3) & (np.abs(a[:, 1]) < YLIM[0])
         if ZB[1] > 0.75:
@@ -112,20 +119,22 @@ def measure(near=False):
     if len(xy) < 40:
         return None
     rng = np.random.default_rng(1); best = (None, None)
-    for _ in range(600):
-        i, j = rng.choice(len(xy), 2, replace=False); d = xy[j] - xy[i]; L = np.linalg.norm(d)
+    sub = xy if len(xy) <= 3000 else xy[rng.choice(len(xy), 3000, replace=False)]   # RANSAC on a sample
+    for _ in range(300):
+        i, j = rng.choice(len(sub), 2, replace=False); d = sub[j] - sub[i]; L = np.linalg.norm(d)
         if L < 0.15:
             continue
         d /= L
         if abs(d[1]) < 0.85:      # want a face roughly across the heading
             continue
-        nr = np.array([-d[1], d[0]]); inl = np.abs((xy - xy[i]) @ nr) < 0.012
-        sc = inl.sum() - 50 * abs(xy[i] @ nr)   # prefer the nearest face
+        nr = np.array([-d[1], d[0]]); inl = np.abs((sub - sub[i]) @ nr) < 0.012
+        sc = inl.sum() - 50 * abs(sub[i] @ nr) * len(sub) / 3000.0   # prefer the nearest face
         if best[0] is None or sc > best[0]:
-            best = (sc, inl)
+            best = (sc, (sub[i].copy(), nr))
     if best[1] is None:
         return None
-    pts = xy[best[1]]
+    p0, nr0 = best[1]
+    pts = xy[np.abs((xy - p0) @ nr0) < 0.012]               # all points of the chosen line, full resolution
     if len(pts) < 30:
         return None
     cen = pts.mean(0); _, _, vt = np.linalg.svd(pts - cen); d = vt[0]
@@ -144,25 +153,48 @@ def measure(near=False):
                 runs=[[round(float((cen + d * r[0])[1]), 4), round(float((cen + d * r[-1])[1]), 4)] for r in runs if len(r) > 15])
 
 
+_CLIENTS = {}
+
+
+def _client(kind, srv, name):
+    if name not in _CLIENTS:
+        _CLIENTS[name] = (n.create_client(srv, name) if kind == 'srv' else ActionClient(n, srv, name))
+    return _CLIENTS[name]
+
+
+def _wait_state(pred, timeout):
+    t = time.time()
+    while time.time() - t < timeout:
+        rclpy.spin_once(n, timeout_sec=0.05)
+        if S[0] is not None and pred(S[0]):
+            return True
+    return False
+
+
 def setmode(v):
-    c = n.create_client(SetControlMode, 'move/SetControlMode'); c.wait_for_service(timeout_sec=5)
+    c = _client('srv', SetControlMode, 'move/SetControlMode'); c.wait_for_service(timeout_sec=5)
     r = SetControlMode.Request(); r.mode = v; f = c.call_async(r)
-    rclpy.spin_until_future_complete(n, f, timeout_sec=5); spin(0.8)
+    rclpy.spin_until_future_complete(n, f, timeout_sec=5)
+    _wait_state(lambda s: s.is_soft_auto == (v == 0), 1.0)     # instead of a fixed 0.8 s pause
 
 
 def unpark():
-    c = n.create_client(SetParkingMode, 'move/SetParkingMode'); c.wait_for_service(timeout_sec=5)
+    if S[0] is not None and not S[0].is_parking_mode:
+        return
+    c = _client('srv', SetParkingMode, 'move/SetParkingMode'); c.wait_for_service(timeout_sec=5)
     r = SetParkingMode.Request(); r.enable = False; f = c.call_async(r)
-    rclpy.spin_until_future_complete(n, f, timeout_sec=5); spin(0.5)
+    rclpy.spin_until_future_complete(n, f, timeout_sec=5)
+    _wait_state(lambda s: not s.is_parking_mode, 0.6)
 
 
 def rel(x=0.0, yaw=0.0, rear_check=False, y=0.0):
     if S[0].is_soft_auto:
         setmode(1)
     unpark()
-    ac = ActionClient(n, MoveRelative, 'move/MoveRelativeCmd')
+    ac = _client('action', MoveRelative, 'move/MoveRelativeCmd')
     if not ac.wait_for_server(timeout_sec=5):
         raise SystemExit('ABORT: no MoveRelative server')
+    MOVES[0] += 1
     g = MoveRelative.Goal()
     g.relative_pose.position.x = float(x); g.relative_pose.position.y = float(y)
     g.relative_pose.orientation.w = float(yaw)        # vendor convention: w = yaw (rad)
@@ -175,7 +207,7 @@ def rel(x=0.0, yaw=0.0, rear_check=False, y=0.0):
         if rear_check and U[0] and min(U[0].get(5, 9), U[0].get(6, 9)) < 0.25:
             log('SAFETY: rear < 0.25 m, cancel'); cf = gh.cancel_goal_async()
             rclpy.spin_until_future_complete(n, cf, timeout_sec=3); raise SystemExit(1)
-    r = rf.result().result if rf.done() else None; spin(1.0)
+    r = rf.result().result if rf.done() else None; spin(0.4)      # let the chassis settle before measuring
     log('  rel move x=%.3f y=%.3f yaw=%.2fdeg -> %s' % (x, y, math.degrees(yaw), (r.error_code, r.error_msg) if r else 'TIMEOUT'))
     if not r or r.error_code != 0:
         raise SystemExit('ABORT: relative move failed')
@@ -183,8 +215,8 @@ def rel(x=0.0, yaw=0.0, rear_check=False, y=0.0):
 
 ST_FILE = os.path.join(HERE, 'stations.json')
 LOG_FILE = os.path.join(HERE, 'dock_log.csv')
-LAT_GAIN = 1.3          # sideways moves achieve ~75 % of the command
-LAT_TOL = 0.003
+LAT_GAIN = 1.0          # small sideways moves are erratic (under- and overshoot): no gain
+LAT_TOL = 0.010         # the chassis cannot place sideways moves below ~1 cm reliably
 LAT_MAX = 0.08
 LAT_PLAN_MAX = 0.60   # planned sideways shift from staging to the dock line
 
@@ -222,7 +254,7 @@ def align_heading(m, dry=False):
 
 
 def align_lateral(m, side, target, dry=False):
-    for k in range(5):
+    for k in range(3):
         dy = end_y(m, side, target) - target
         log('lateral: %s end at y=%.4f, target %.4f, error %.4f' % (side, end_y(m, side, target), target, dy))
         if abs(dy) <= LAT_TOL:
@@ -282,13 +314,43 @@ def approach(gap, dry, align_only=False):
     json.dump(dict(fwd=fwd, gap=gap, t=time.time()), open('/tmp/claude_dock_last.json', 'w'))
 
 
+def nav_task(st):
+    """Submit the vendor navigation task to the station's staging point (in-process, NAV_SPEED)."""
+    from server.srv import CreateTaskById, CreateTaskByPose
+    from server.msg import TargetInfoWithId, TargetInfoWithPose
+    if 'staging_pose' in st:
+        sx, sy, sh = st['staging_pose']
+        t = TargetInfoWithPose(); t.target_pose.position.x = float(sx); t.target_pose.position.y = float(sy)
+        t.target_pose.orientation.w = math.radians(sh)              # vendor convention: w = yaw (rad)
+        t.action_type = 0; t.action_param = 0.0
+        c = _client('srv', CreateTaskByPose, 'server/CreateTaskByPose'); r = CreateTaskByPose.Request()
+    else:
+        t = TargetInfoWithId(); t.target_id = int(st['staging']); t.action_type = 0; t.action_param = 0.0
+        c = _client('srv', CreateTaskById, 'server/CreateTaskById'); r = CreateTaskById.Request(); r.navigation_mode = 0
+    r.max_speed = NAV_SPEED; r.max_loop_times = 1; r.target_list = [t]
+    if not c.wait_for_service(timeout_sec=5):
+        raise SystemExit('ABORT: navigation service not available')
+    f = c.call_async(r); rclpy.spin_until_future_complete(n, f, timeout_sec=10); res = f.result()
+    if res is None:
+        raise SystemExit('ABORT: navigation service did not answer')
+    return 'task %d %d %s (speed %.2f m/s)' % (res.task_id, res.error_code, res.error_msg, NAV_SPEED)
+
+
+_POSE = [None]
+_POSE_SUB = []
+
+
 def map_pose():
-    from slam.msg import LocationData
-    P = [None]; sub = n.create_subscription(LocationData, 'slam/LocationData', lambda m: P.__setitem__(0, m), qos_profile_sensor_data)
+    """Latest map pose (x, y, yaw) from a persistent subscription."""
+    if not _POSE_SUB:
+        from slam.msg import LocationData
+        _POSE_SUB.append(n.create_subscription(LocationData, 'slam/LocationData',
+                                               lambda m: _POSE.__setitem__(0, m), qos_profile_sensor_data))
     t = time.time()
-    while P[0] is None and time.time() - t < 3:
+    while _POSE[0] is None and time.time() - t < 3:
         rclpy.spin_once(n, timeout_sec=0.05)
-    n.destroy_subscription(sub); p = P[0].pose
+    rclpy.spin_once(n, timeout_sec=0.0)
+    p = _POSE[0].pose
     return p.position.x, p.position.y, p.orientation.z
 
 
@@ -311,9 +373,9 @@ def cancel_all_tasks():
 def wait_task(tmo=150, near=None, tol=0.20):
     """Wait until the navigation task is gone.  The vendor server keeps a station task open when the robot
     stops a few cm off the node ("Current Pos Without Node"); so if we are within `tol` of the staging point
-    and have not moved for 3 s, treat it as arrived and cancel the dangling task ourselves."""
+    and have not moved for 1.5 s, treat it as arrived and cancel the dangling task ourselves."""
     import urllib.request
-    t0 = time.time(); time.sleep(2); last = None; still = time.time()
+    t0 = time.time(); spin(0.5); last = None; still = time.time()
     while time.time() - t0 < tmo:
         q = urllib.request.Request('http://127.0.0.1:8080/api/Task/GetAllTask', data=b'{}',
                                    headers={'Content-Type': 'application/json'})
@@ -323,10 +385,10 @@ def wait_task(tmo=150, near=None, tol=0.20):
             x, y, yaw = map_pose()
             if last is None or math.hypot(x - last[0], y - last[1]) > 0.005 or abs(yaw - last[2]) > 0.005:
                 still = time.time(); last = (x, y, yaw)
-            if math.hypot(x - near[0], y - near[1]) < tol and time.time() - still > 3.0:
+            if math.hypot(x - near[0], y - near[1]) < tol and time.time() - still > 1.5:
                 log('arrived %.3f m from staging but the server keeps the task open: cancelling it' % math.hypot(x - near[0], y - near[1]))
                 cancel_all_tasks(); return True
-        time.sleep(1)
+        spin(0.5)
     return False
 
 
@@ -378,20 +440,14 @@ elif cmd in ('dock', 'redock'):
             move_to_turn_spot(0.6)
         if not S[0].is_soft_auto:
             setmode(0)
-        if 'staging_pose' in st:
-            sx, sy, sh = st['staging_pose']
-            out = subprocess.run(['python3', os.path.join(HERE, 'nav.py'), 'goto', str(sx), str(sy), str(math.radians(sh)), '--speed', '0.25'],
-                                 capture_output=True, text=True).stdout.strip()
-        else:
-            out = subprocess.run(['python3', os.path.join(HERE, 'nav.py'), 'node', str(st['staging']), '--speed', '0.25'],
-                                 capture_output=True, text=True).stdout.strip()
+        out = nav_task(st)                                      # in-process service call (no extra process)
         log(out)
         if ' 0 Succ' not in out:
             raise SystemExit('ABORT: task not created')
         sxy = st.get('staging_xy') or (st['staging_pose'][:2] if 'staging_pose' in st else None)
         if not wait_task(near=sxy):
             raise SystemExit('ABORT: staging not reached in time')
-        spin(1.5)
+        spin(0.3)
         # the task list also empties when the task is cancelled or fails: check we really are at the staging point
         if sxy:
             x, y, _ = map_pose(); dd = math.hypot(x - sxy[0], y - sxy[1])
@@ -415,20 +471,16 @@ elif cmd in ('dock', 'redock'):
         fwd = m['dist'] - FRONT - gap
         pw = RM.remove_self(cloud(), CFG); sz = RM.surface_height(pw, m['dist'])
         place = bool(st.get('place'))
-
-        def blocked_at(f_):
-            # the straight approach AND (place stations) the place motion run afterwards must be clear
-            return RM.sweep_hits(pw, CFG, f_, 0.0) or (RM.place_motion_hits(pw, CFG, f_, sz) if place else None)
-        why = blocked_at(fwd); reached = why is None
-        if why:
+        # largest forward distance for which the straight approach AND (place stations) the place motion run
+        # afterwards are clear - computed directly, not by stepping
+        ok = RM.max_forward(pw, CFG, max(fwd, 0.0))
+        if ok is not None and place:
+            ok = RM.max_place_forward(pw, CFG, ok, sz)
+        reached = ok is not None and ok >= fwd - 0.005
+        if not reached:
+            why = RM.sweep_hits(pw, CFG, fwd, 0.0) or (RM.place_motion_hits(pw, CFG, fwd, sz) if place else None)
             if '--closest' not in sys.argv:
-                need_clear(why, 'straight approach / place motion')
-            ok = None
-            for f_ in np.arange(0.0, fwd + 1e-9, 0.01):
-                if RM.sweep_hits(pw, CFG, float(f_), 0.0):
-                    break
-                if not place or not RM.place_motion_hits(pw, CFG, float(f_), sz):
-                    ok = float(f_)
+                need_clear(why or {'what': 'approach/place motion'}, 'straight approach / place motion')
             if ok is None:
                 raise SystemExit('ABORT: no position on this line where the approach and the place motion are '
                                  'clear: %s' % json.dumps(why))
@@ -453,13 +505,11 @@ elif cmd in ('dock', 'redock'):
         # arm motion not fixed yet: go to the requested gap, or as close as the robot + arms + tray stay clear
         pw = RM.remove_self(cloud(), CFG); dy = end_y(m, st['side'], st['end_y']) - st['end_y']
         need_clear(RM.sweep_hits(pw, CFG, 0.0, dy), 'sideways move to the taught position')
-        f0 = m['dist'] - FRONT - gap; ok = f0
-        if RM.sweep_hits(pw - np.array([0.0, dy, 0.0]), CFG, f0, 0.0):
-            ok = 0.0
-            for f_ in np.arange(0.01, f0 + 1e-9, 0.01):
-                if RM.sweep_hits(pw - np.array([0.0, dy, 0.0]), CFG, float(f_), 0.0):
-                    break
-                ok = float(f_)
+        f0 = m['dist'] - FRONT - gap
+        ok = RM.max_forward(pw - np.array([0.0, dy, 0.0]), CFG, max(f0, 0.0))
+        if ok is None:
+            raise SystemExit('ABORT: already touching something ahead after the sideways move')
+        if ok < f0 - 0.005:
             log('requested gap %.3f is blocked -> will stop at gap %.3f (closest clear)' % (gap, m['dist'] - FRONT - ok))
             gap = m['dist'] - FRONT - ok
     plan_approach(m, st, gap)                                  # stops here if the taught approach is blocked

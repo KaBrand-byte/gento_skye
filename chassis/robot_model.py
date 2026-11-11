@@ -116,15 +116,80 @@ def rotation_hits(p, cfg, phase='carry'):
     return worst
 
 
+NOISE = 10        # fewer offending lidar returns than this are treated as noise (same rule as _report)
+
+
+def _swept(b, dx, dy):
+    """Exact volume swept by an axis-aligned box translated along x or y (no rotation)."""
+    return [min(b[0], b[0] + dx), max(b[1], b[1] + dx), min(b[2], b[2] + dy), max(b[3], b[3] + dy), b[4], b[5]]
+
+
 def sweep_hits(p, cfg, dx, dy=0.0, phase='carry'):
-    """Straight move by (dx, dy) without turning, sampled every 1 cm."""
-    m = cfg.get('margin_straight', 0.03); p = remove_self(p, cfg, phase)
-    k = max(1, int(math.hypot(dx, dy) / 0.01)); hit = np.zeros(len(p), bool)
-    for i in range(k + 1):
-        q = p - np.array([dx * i / k, dy * i / k, 0.0])
+    """Straight move by (dx, dy) without turning.  Pure forward/back or sideways moves are checked exactly in
+    one pass (the swept volume of a box is a longer box); diagonal moves are sampled every 2 cm."""
+    m = cfg.get('margin_straight', 0.03); p = remove_self(p, cfg, phase); hit = np.zeros(len(p), bool)
+    if abs(dx) < 1e-9 or abs(dy) < 1e-9:
         for _, b in boxes(cfg, phase):
-            hit |= _inside(q, b, m)
+            hit |= _inside(p, _swept(b, dx, dy), m)
+    else:
+        k = max(1, int(math.hypot(dx, dy) / 0.02))
+        for i in range(k + 1):
+            q = p - np.array([dx * i / k, dy * i / k, 0.0])
+            for _, b in boxes(cfg, phase):
+                hit |= _inside(q, b, m)
     return _report(p, hit, 'sweep dx=%.2f dy=%.2f' % (dx, dy))
+
+
+def _kth(values, k=NOISE):
+    """k-th smallest value (noise-robust minimum); +inf when fewer than k values."""
+    if len(values) < k:
+        return float('inf')
+    return float(np.partition(values, k - 1)[k - 1])
+
+
+def max_forward(p, cfg, limit, phase='carry'):
+    """Largest straight forward distance <= limit that the robot (all boxes) can drive without contact."""
+    m = cfg.get('margin_straight', 0.03); p = remove_self(p, cfg, phase); best = float(limit)
+    for _, b in boxes(cfg, phase):
+        band = (p[:, 1] > b[2] - m) & (p[:, 1] < b[3] + m) & (p[:, 2] > b[4] - m) & (p[:, 2] < b[5] + m) & (p[:, 0] > b[0] - m)
+        best = min(best, _kth(p[band, 0] - b[1] - m))
+    return max(best, 0.0) if best > -1e-9 else None      # None: already touching something ahead
+
+
+def _free_points(intervals, lo, hi, k=NOISE):
+    """Allowed sub-ranges of [lo, hi]: places covered by fewer than k of the blocked intervals [start, end]."""
+    if len(intervals) == 0:
+        return [(lo, hi)]
+    starts, ends = np.sort(intervals[:, 0]), np.sort(intervals[:, 1])
+    cuts = np.unique(np.concatenate([[lo, hi], starts[(starts > lo) & (starts < hi)], ends[(ends > lo) & (ends < hi)]]))
+    mids = (cuts[:-1] + cuts[1:]) / 2
+    cover = np.searchsorted(starts, mids, side='right') - np.searchsorted(ends, mids, side='left')
+    free = []
+    for a, b, ok in zip(cuts[:-1], cuts[1:], cover < k):
+        if not ok:
+            continue
+        if free and abs(free[-1][1] - a) < 1e-12:
+            free[-1] = (free[-1][0], float(b))
+        else:
+            free.append((float(a), float(b)))
+    return free
+
+
+def max_place_forward(p, cfg, limit, surface_z, clear=0.02):
+    """Largest forward distance <= limit for which the place motion run afterwards (forward, down, hands out)
+    is clear; None if there is none.  The surface itself (up to surface_z + clear) is expected."""
+    pm = cfg['place_motion']; m = cfg.get('margin_straight', 0.03); p = remove_self(p, cfg); iv = []
+    for name, b in boxes(cfg):
+        if name not in ('arms', 'tray'):
+            continue
+        env = [b[0], b[1] + pm['forward'], b[2] - pm['side'], b[3] + pm['side'], b[4] - pm['down'], b[5]]
+        floor = max(env[4], (surface_z + clear) if surface_z is not None else env[4])
+        band = (p[:, 1] > env[2] - m) & (p[:, 1] < env[3] + m) & (p[:, 2] > floor) & (p[:, 2] < env[5] + m)
+        x = p[band, 0]
+        iv.append(np.stack([x - env[1] - m, x - env[0] + m], 1))    # f values for which the point is inside
+    iv = np.concatenate(iv) if iv else np.zeros((0, 2))
+    free = _free_points(iv, 0.0, float(limit))
+    return max(f[1] for f in free) if free else None
 
 
 def place_hits(p, cfg, dx, surface_z, clear=0.02):
@@ -165,34 +230,56 @@ def surface_height(p, face_dist, depth=0.35):
     return float(edges[dense.max()] + 0.02)
 
 
-def leave_move(p, cfg, max_d=0.6, step=0.05, phase='carry'):
-    """Shortest straight move (reverse, sideways or diagonal-back, no turning) that is itself collision-free
-    and after which turning in place is clear.  Returns (dx, dy) in body frame, (0, 0) if already clear,
-    None if nothing within max_d works."""
+def _turn_clear_distance(q, R, u, max_d):
+    """Smallest d in [0, max_d] such that every point of q (2-D, robot frame) is farther than R from d*u
+    (noise rule applied); None if none."""
+    t = q @ u; perp2 = (q ** 2).sum(1) - t ** 2
+    close = perp2 < R * R
+    s = np.sqrt(np.maximum(R * R - perp2[close], 0.0))
+    iv = np.stack([t[close] - s, t[close] + s], 1)
+    free = _free_points(iv, 0.0, float(max_d))
+    return free[0][0] if free else None
+
+
+def leave_move(p, cfg, max_d=0.6, phase='carry'):
+    """Shortest straight move (reverse, sideways or diagonal-back; no turning) that is itself collision-free
+    and after which turning in place is clear - computed exactly, not by trial.  Returns (dx, dy) in the body
+    frame, (0, 0) if turning is already clear, None if nothing within max_d works."""
     if not rotation_hits(p, cfg, phase):
         return (0.0, 0.0)
-    p = remove_self(p, cfg, phase)              # drop the robot's own points BEFORE shifting the cloud
-    k = math.sqrt(0.5)
-    for d in np.arange(step, max_d + 1e-9, step):
-        for ux, uy in ((-1, 0), (0, -1), (0, 1), (-k, -k), (-k, k)):
-            dx, dy = float(ux * d), float(uy * d)
-            if not sweep_hits(p, cfg, dx, dy, phase) and not rotation_hits(p - np.array([dx, dy, 0.0]), cfg, phase):
-                return (dx, dy)
-    return None
+    p = remove_self(p, cfg, phase); m = cfg['margin']; k = math.sqrt(0.5); best = None
+    for ux, uy in ((-1.0, 0.0), (0.0, -1.0), (0.0, 1.0), (-k, -k), (-k, k)):
+        u = np.array([ux, uy]); need = 0.0
+        for _, b in boxes(cfg, phase):
+            R = max(math.hypot(x, y) for x in (b[0], b[1]) for y in (b[2], b[3])) + m
+            band = (p[:, 2] > b[4] - m) & (p[:, 2] < b[5] + m)
+            d = _turn_clear_distance(p[band, :2], R, u, max_d)
+            if d is None:
+                need = None; break
+            need = max(need, d)
+        if need is None:
+            continue
+        need = min(max_d, need + 0.02)                  # 2 cm extra: moves stop a little short
+        # all boxes together may need slightly more than the per-box minimum: verify, then extend if needed
+        for _ in range(5):
+            if not rotation_hits(p - np.array([ux * need, uy * need, 0.0]), cfg, phase):
+                break
+            need += 0.03
+        else:
+            continue
+        if need > max_d or sweep_hits(p, cfg, ux * need, uy * need, phase):
+            continue
+        if best is None or need < best[0]:
+            best = (need, (float(ux * need), float(uy * need)))
+    return best[1] if best else None
 
 
-def leave_distance(p, cfg, max_back=0.8, step=0.05, phase='carry'):
-    """Shortest straight reverse after which turning in place is clear (the reverse itself must be clear).
-    Returns metres, 0.0 if turning is already safe, None if no such distance within max_back."""
+def leave_distance(p, cfg, max_back=0.8, phase='carry'):
+    """Shortest straight reverse after which turning in place is clear (kept for callers of the old API)."""
     if not rotation_hits(p, cfg, phase):
         return 0.0
-    p = remove_self(p, cfg, phase)              # drop the robot's own points BEFORE shifting the cloud
-    for b in np.arange(step, max_back + 1e-9, step):
-        if sweep_hits(p, cfg, -b, 0.0, phase):
-            return None
-        if not rotation_hits(p + np.array([b, 0.0, 0.0]), cfg, phase):
-            return float(b)
-    return None
+    mv = leave_move(p, cfg, max_back, phase)
+    return -mv[0] if mv and abs(mv[1]) < 1e-9 else None
 
 
 def selfscan(p, face_min=0.95):
