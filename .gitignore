@@ -1,0 +1,23 @@
+__pycache__/
+*.py[cod]
+runs/
+.venv/
+
+# Local tools and operating system files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+.agents/
+.codex/
+.aws/
+
+# Local environment and test caches
+.env
+.env.*
+!.env.example
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/

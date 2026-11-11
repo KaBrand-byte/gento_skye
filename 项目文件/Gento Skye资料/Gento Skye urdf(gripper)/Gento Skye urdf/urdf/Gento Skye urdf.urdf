@@ -1,0 +1,3143 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- This URDF was automatically created by SolidWorks to URDF Exporter! Originally created by Stephen Brawner (brawner@gmail.com) 
+     Commit Version: 1.6.0-4-g7f85cfe  Build Version: 1.6.7995.38578
+     For more information, please see http://wiki.ros.org/sw_urdf_exporter -->
+<robot
+  name="Gento Skye urdf">
+  <link
+    name="base_link">
+    <inertial>
+      <origin
+        xyz="-0.05978825 0.00081351 0.4457615"
+        rpy="0 0 0" />
+      <mass
+        value="158.81" />
+      <inertia
+        ixx="17.679676"
+        ixy="0.00018338"
+        ixz="0.4285173"
+        iyy="18.005334"
+        iyz="0.03608492"
+        izz="2.479441" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Gento Skye urdf/meshes/base_link.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="1 0 0 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Gento Skye urdf/meshes/base_link.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <link
+    name="ZQ_Link">
+    <inertial>
+      <origin
+        xyz="-0.00066985 -0.02419 -0.061628"
+        rpy="0 0 0" />
+      <mass
+        value="0.64977" />
+      <inertia
+        ixx="0.00076148"
+        ixy="-1.7245E-08"
+        ixz="-3.525E-07"
+        iyy="0.00058131"
+        iyz="-0.00023758"
+        izz="0.00052221" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Gento Skye urdf/meshes/ZQ_Link.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0 1 0 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Gento Skye urdf/meshes/ZQ_Link.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="ZQ"
+    type="revolute">
+    <origin
+      xyz="0.23072 0.21738 0.206"
+      rpy="0 0 0" />
+    <parent
+      link="base_link" />
+    <child
+      link="ZQ_Link" />
+    <axis
+      xyz="0 0 -1" />
+    <limit
+      lower="-2.967"
+      upper="2.967"
+      effort="0"
+      velocity="6.28" />
+  </joint>
+  <link
+    name="ZQL_Link">
+    <inertial>
+      <origin
+        xyz="-2.4339E-06 2.8529E-06 0.00078462"
+        rpy="0 0 0" />
+      <mass
+        value="1.2232" />
+      <inertia
+        ixx="0.0020517"
+        ixy="1.24E-08"
+        ixz="-7.2992E-08"
+        iyy="0.0020521"
+        iyz="2.471E-07"
+        izz="0.0037675" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Gento Skye urdf/meshes/ZQL_Link.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0 0 1 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Gento Skye urdf/meshes/ZQL_Link.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="ZQL"
+    type="revolute">
+    <origin
+      xyz="-0.00071653 0.00061603 -0.136"
+      rpy="1.5708 0 0" />
+    <parent
+      link="ZQ_Link" />
+    <child
+      link="ZQL_Link" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="-2.967"
+      upper="2.967"
+      effort="0"
+      velocity="6.28" />
+  </joint>
+  <link
+    name="YQ_Link">
+    <inertial>
+      <origin
+        xyz="0.00066985 0.02419 -0.061628"
+        rpy="0 0 0" />
+      <mass
+        value="0.64977" />
+      <inertia
+        ixx="0.00076148"
+        ixy="-1.7245E-08"
+        ixz="3.525E-07"
+        iyy="0.00058131"
+        iyz="0.00023758"
+        izz="0.00052221" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Gento Skye urdf/meshes/YQ_Link.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0 1 0 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Gento Skye urdf/meshes/YQ_Link.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="YQ"
+    type="revolute">
+    <origin
+      xyz="0.22928 -0.21738 0.206"
+      rpy="0 0 0" />
+    <parent
+      link="base_link" />
+    <child
+      link="YQ_Link" />
+    <axis
+      xyz="0 0 -1" />
+    <limit
+      lower="-2.967"
+      upper="2.967"
+      effort="0"
+      velocity="6.28" />
+  </joint>
+  <link
+    name="YQL_Link">
+    <inertial>
+      <origin
+        xyz="-2.4339E-06 2.8529E-06 0.00078462"
+        rpy="0 0 0" />
+      <mass
+        value="1.2232" />
+      <inertia
+        ixx="0.0020517"
+        ixy="1.24E-08"
+        ixz="-7.2992E-08"
+        iyy="0.0020521"
+        iyz="2.471E-07"
+        izz="0.0037675" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Gento Skye urdf/meshes/YQL_Link.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0 0 1 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Gento Skye urdf/meshes/YQL_Link.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="YQL"
+    type="revolute">
+    <origin
+      xyz="0.00071653 -0.00061603 -0.136"
+      rpy="1.5708 0 3.1416" />
+    <parent
+      link="YQ_Link" />
+    <child
+      link="YQL_Link" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="ZH_Link">
+    <inertial>
+      <origin
+        xyz="-0.00066985 -0.02419 -0.061628"
+        rpy="0 0 0" />
+      <mass
+        value="0.64977" />
+      <inertia
+        ixx="0.00076148"
+        ixy="-1.7245E-08"
+        ixz="-3.525E-07"
+        iyy="0.00058131"
+        iyz="-0.00023758"
+        izz="0.00052221" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Gento Skye urdf/meshes/ZH_Link.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0 1 0 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Gento Skye urdf/meshes/ZH_Link.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="ZH"
+    type="revolute">
+    <origin
+      xyz="-0.22928 0.21738 0.206"
+      rpy="0 0 0" />
+    <parent
+      link="base_link" />
+    <child
+      link="ZH_Link" />
+    <axis
+      xyz="0 0 -1" />
+    <limit
+      lower="-2.967"
+      upper="2.967"
+      effort="0"
+      velocity="6.28" />
+  </joint>
+  <link
+    name="ZHL_Link">
+    <inertial>
+      <origin
+        xyz="-1.6476E-06 3.3687E-06 0.00078462"
+        rpy="0 0 0" />
+      <mass
+        value="1.2232" />
+      <inertia
+        ixx="0.0020518"
+        ixy="8.8177E-08"
+        ixz="-9.2298E-09"
+        iyy="0.002052"
+        iyz="2.5749E-07"
+        izz="0.0037675" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Gento Skye urdf/meshes/ZHL_Link.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0 0 1 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Gento Skye urdf/meshes/ZHL_Link.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="ZHL"
+    type="revolute">
+    <origin
+      xyz="-0.00071653 0.00061603 -0.136"
+      rpy="1.5708 0 0" />
+    <parent
+      link="ZH_Link" />
+    <child
+      link="ZHL_Link" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="-2.967"
+      upper="2.967"
+      effort="0"
+      velocity="6.28" />
+  </joint>
+  <link
+    name="YH_Link">
+    <inertial>
+      <origin
+        xyz="0.00066985 0.02419 -0.061628"
+        rpy="0 0 0" />
+      <mass
+        value="0.64977" />
+      <inertia
+        ixx="0.00076148"
+        ixy="-1.7245E-08"
+        ixz="3.525E-07"
+        iyy="0.00058131"
+        iyz="0.00023758"
+        izz="0.00052221" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Gento Skye urdf/meshes/YH_Link.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0 1 0 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Gento Skye urdf/meshes/YH_Link.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="YH"
+    type="revolute">
+    <origin
+      xyz="-0.23072 -0.21738 0.206"
+      rpy="0 0 0" />
+    <parent
+      link="base_link" />
+    <child
+      link="YH_Link" />
+    <axis
+      xyz="0 0 -1" />
+    <limit
+      lower="-2.967"
+      upper="2.967"
+      effort="0"
+      velocity="6.28" />
+  </joint>
+  <link
+    name="YHL_Link">
+    <inertial>
+      <origin
+        xyz="-2.4339E-06 2.8529E-06 0.00078462"
+        rpy="0 0 0" />
+      <mass
+        value="1.2232" />
+      <inertia
+        ixx="0.0020517"
+        ixy="1.24E-08"
+        ixz="-7.2992E-08"
+        iyy="0.0020521"
+        iyz="2.471E-07"
+        izz="0.0037675" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Gento Skye urdf/meshes/YHL_Link.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0 0 1 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Gento Skye urdf/meshes/YHL_Link.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="YHL"
+    type="revolute">
+    <origin
+      xyz="0.00071653 -0.00061603 -0.136"
+      rpy="1.5708 0 3.1416" />
+    <parent
+      link="YH_Link" />
+    <child
+      link="YHL_Link" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="-2.967"
+      upper="2.967"
+      effort="0"
+      velocity="6.28" />
+  </joint>
+  <link
+    name="ZLD_Link">
+    <inertial>
+      <origin
+        xyz="-0.044089 -5.1873E-10 -0.031524"
+        rpy="0 0 0" />
+      <mass
+        value="0.011716" />
+      <inertia
+        ixx="3.6795E-07"
+        ixy="5.1524E-14"
+        ixz="-7.7265E-09"
+        iyy="6.5201E-07"
+        iyz="2.1499E-14"
+        izz="5.8894E-07" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Gento Skye urdf/meshes/ZLD_Link.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0 1 0 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Gento Skye urdf/meshes/ZLD_Link.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="ZLD"
+    type="fixed">
+    <origin
+      xyz="0.22097 0.2007 0.36602"
+      rpy="0.1322 -0.19146 2.6076" />
+    <parent
+      link="base_link" />
+    <child
+      link="ZLD_Link" />
+    <axis
+      xyz="0 0 0" />
+  </joint>
+  <link
+    name="YLD_Link">
+    <inertial>
+      <origin
+        xyz="-0.044089 -5.1873E-10 -0.031524"
+        rpy="0 0 0" />
+      <mass
+        value="0.011716" />
+      <inertia
+        ixx="3.6795E-07"
+        ixy="5.1524E-14"
+        ixz="-7.7265E-09"
+        iyy="6.5201E-07"
+        iyz="2.1499E-14"
+        izz="5.8894E-07" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Gento Skye urdf/meshes/YLD_Link.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0 1 0 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Gento Skye urdf/meshes/YLD_Link.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="YLD"
+    type="fixed">
+    <origin
+      xyz="-0.22097 -0.2007 0.36602"
+      rpy="0.1322 -0.19146 -0.53402" />
+    <parent
+      link="base_link" />
+    <child
+      link="YLD_Link" />
+    <axis
+      xyz="0 0 0" />
+  </joint>
+  <link
+    name="C1_Link">
+    <inertial>
+      <origin
+        xyz="-2.7419E-07 3.7626E-06 -0.012402"
+        rpy="0 0 0" />
+      <mass
+        value="0.019788" />
+      <inertia
+        ixx="1.8765E-06"
+        ixy="2.8229E-12"
+        ixz="-7.4382E-12"
+        iyy="4.3593E-06"
+        iyz="1.0192E-10"
+        izz="4.9605E-06" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Gento Skye urdf/meshes/C1_Link.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0 1 0 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Gento Skye urdf/meshes/C1_Link.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="C1"
+    type="fixed">
+    <origin
+      xyz="-0.17391 -0.2725 0.22896"
+      rpy="1.5708 0 0" />
+    <parent
+      link="base_link" />
+    <child
+      link="C1_Link" />
+    <axis
+      xyz="0 0 0" />
+  </joint>
+  <link
+    name="C2_Link">
+    <inertial>
+      <origin
+        xyz="-2.7419E-07 3.7626E-06 -0.012402"
+        rpy="0 0 0" />
+      <mass
+        value="0.019788" />
+      <inertia
+        ixx="1.8765E-06"
+        ixy="2.8229E-12"
+        ixz="-7.4382E-12"
+        iyy="4.3593E-06"
+        iyz="1.0192E-10"
+        izz="4.9605E-06" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Gento Skye urdf/meshes/C2_Link.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0 1 0 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Gento Skye urdf/meshes/C2_Link.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="C2"
+    type="fixed">
+    <origin
+      xyz="0.17397 -0.2725 0.22859"
+      rpy="1.5708 0 0" />
+    <parent
+      link="base_link" />
+    <child
+      link="C2_Link" />
+    <axis
+      xyz="0 0 0" />
+  </joint>
+  <link
+    name="C3_Link">
+    <inertial>
+      <origin
+        xyz="-2.7337E-07 3.7644E-06 -0.012402"
+        rpy="0 0 0" />
+      <mass
+        value="0.019788" />
+      <inertia
+        ixx="1.8765E-06"
+        ixy="2.8661E-12"
+        ixz="-7.4542E-12"
+        iyy="4.3593E-06"
+        iyz="1.0196E-10"
+        izz="4.9605E-06" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Gento Skye urdf/meshes/C3_Link.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0 1 0 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Gento Skye urdf/meshes/C3_Link.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="C3"
+    type="fixed">
+    <origin
+      xyz="0.32715 -0.18131 0.20259"
+      rpy="1.5708 0 1.2399" />
+    <parent
+      link="base_link" />
+    <child
+      link="C3_Link" />
+    <axis
+      xyz="0 0 0" />
+  </joint>
+  <link
+    name="C4_Link">
+    <inertial>
+      <origin
+        xyz="-2.7336E-07 3.7644E-06 -0.012402"
+        rpy="0 0 0" />
+      <mass
+        value="0.019788" />
+      <inertia
+        ixx="1.8765E-06"
+        ixy="2.8668E-12"
+        ixz="-7.452E-12"
+        iyy="4.3593E-06"
+        iyz="1.0196E-10"
+        izz="4.9605E-06" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Gento Skye urdf/meshes/C4_Link.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0 1 0 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Gento Skye urdf/meshes/C4_Link.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="C4"
+    type="fixed">
+    <origin
+      xyz="0.32715 0.18131 0.20259"
+      rpy="1.5708 0 1.9017" />
+    <parent
+      link="base_link" />
+    <child
+      link="C4_Link" />
+    <axis
+      xyz="0 0 0" />
+  </joint>
+  <link
+    name="C5_Link">
+    <inertial>
+      <origin
+        xyz="-2.7419E-07 3.7626E-06 -0.012402"
+        rpy="0 0 0" />
+      <mass
+        value="0.019788" />
+      <inertia
+        ixx="1.8765E-06"
+        ixy="2.8229E-12"
+        ixz="-7.4382E-12"
+        iyy="4.3593E-06"
+        iyz="1.0192E-10"
+        izz="4.9605E-06" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Gento Skye urdf/meshes/C5_Link.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0 1 0 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Gento Skye urdf/meshes/C5_Link.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="C5"
+    type="fixed">
+    <origin
+      xyz="0.17406 0.27223 0.22859"
+      rpy="1.5708 0 3.1416" />
+    <parent
+      link="base_link" />
+    <child
+      link="C5_Link" />
+    <axis
+      xyz="0 0 0" />
+  </joint>
+  <link
+    name="C6_Link">
+    <inertial>
+      <origin
+        xyz="-2.7419E-07 3.7626E-06 -0.012402"
+        rpy="0 0 0" />
+      <mass
+        value="0.019788" />
+      <inertia
+        ixx="1.8765E-06"
+        ixy="2.8229E-12"
+        ixz="-7.4382E-12"
+        iyy="4.3593E-06"
+        iyz="1.0192E-10"
+        izz="4.9605E-06" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Gento Skye urdf/meshes/C6_Link.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0 1 0 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Gento Skye urdf/meshes/C6_Link.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="C6"
+    type="fixed">
+    <origin
+      xyz="-0.17371 0.2725 0.22896"
+      rpy="1.5708 0 -3.1416" />
+    <parent
+      link="base_link" />
+    <child
+      link="C6_Link" />
+    <axis
+      xyz="0 0 0" />
+  </joint>
+  <link
+    name="C7_Link">
+    <inertial>
+      <origin
+        xyz="-2.7359E-07 3.7639E-06 -0.012402"
+        rpy="0 0 0" />
+      <mass
+        value="0.019788" />
+      <inertia
+        ixx="1.8765E-06"
+        ixy="2.8544E-12"
+        ixz="-7.4493E-12"
+        iyy="4.3593E-06"
+        iyz="1.0196E-10"
+        izz="4.9605E-06" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Gento Skye urdf/meshes/C7_Link.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0 1 0 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Gento Skye urdf/meshes/C7_Link.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="C7"
+    type="fixed">
+    <origin
+      xyz="-0.32119 0.16647 0.2139"
+      rpy="1.5708 0 -1.709556" />
+    <parent
+      link="base_link" />
+    <child
+      link="C7_Link" />
+    <axis
+      xyz="0 0 0" />
+  </joint>
+  <link
+    name="C8_Link">
+    <inertial>
+      <origin
+        xyz="-2.7356E-07 3.7639E-06 -0.012402"
+        rpy="0 0 0" />
+      <mass
+        value="0.019788" />
+      <inertia
+        ixx="1.8765E-06"
+        ixy="2.8561E-12"
+        ixz="-7.4465E-12"
+        iyy="4.3593E-06"
+        iyz="1.0195E-10"
+        izz="4.9605E-06" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Gento Skye urdf/meshes/C8_Link.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0 1 0 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Gento Skye urdf/meshes/C8_Link.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="C8"
+    type="fixed">
+    <origin
+      xyz="-0.32119 -0.16647 0.2139"
+      rpy="1.5708 0 -1.4304" />
+    <parent
+      link="base_link" />
+    <child
+      link="C8_Link" />
+    <axis
+      xyz="0 0 0" />
+  </joint>
+  <link
+    name="IMU_Link">
+    <inertial>
+      <origin
+        xyz="-0.0021919 0.0026054 -0.0067841"
+        rpy="0 0 0" />
+      <mass
+        value="0.0072701" />
+      <inertia
+        ixx="7.4527E-07"
+        ixy="-6.1438E-09"
+        ixz="9.4122E-11"
+        iyy="2.2977E-07"
+        iyz="7.65E-10"
+        izz="9.4254E-07" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Gento Skye urdf/meshes/IMU_Link.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0 1 0 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Gento Skye urdf/meshes/IMU_Link.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="IMU"
+    type="fixed">
+    <origin
+      xyz="0 0 0.1"
+      rpy="0 0 0" />
+    <parent
+      link="base_link" />
+    <child
+      link="IMU_Link" />
+    <axis
+      xyz="0 0 0" />
+  </joint>
+  <link
+    name="XJ_Link">
+    <inertial>
+      <origin
+        xyz="3.4694E-18 0 0.00073871"
+        rpy="0 0 0" />
+      <mass
+        value="0.00017226" />
+      <inertia
+        ixx="5.5043E-10"
+        ixy="3.9032E-42"
+        ixz="-1.3728E-29"
+        iyy="5.5043E-10"
+        iyz="-1.2457E-42"
+        izz="9.8412E-10" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Gento Skye urdf/meshes/XJ_Link.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0 1 0 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Gento Skye urdf/meshes/XJ_Link.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="XJ"
+    type="fixed">
+    <origin
+      xyz="0.34185 0.0175 0.199"
+      rpy="1.5708 0 1.5708" />
+    <parent
+      link="base_link" />
+    <child
+      link="XJ_Link" />
+    <axis
+      xyz="0 0 0" />
+  </joint>
+  <link
+    name="waist_Link_1_prismatic">
+    <inertial>
+      <origin
+        xyz="-0.043051 -0.00099026 -0.0031441"
+        rpy="0 0 0" />
+      <mass
+        value="6.0547" />
+      <inertia
+        ixx="0.013887"
+        ixy="0.00025825"
+        ixz="-0.0014717"
+        iyy="0.041848"
+        iyz="1.8808E-05"
+        izz="0.03664" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Gento Skye urdf/meshes/waist_Link_1_prismatic.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0 1 0 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Gento Skye urdf/meshes/waist_Link_1_prismatic.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="waist_jiont_1_prismatic"
+    type="prismatic">
+    <origin
+      xyz="0.18048 0 0.36213"
+      rpy="0 0 0" />
+    <parent
+      link="base_link" />
+    <child
+      link="waist_Link_1_prismatic" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="0"
+      upper="0.86"
+      effort="0"
+      velocity="0.2" />
+  </joint>
+  <link
+    name="waist_Link_2">
+    <inertial>
+      <origin
+        xyz="0.0026414 0.02235 -0.0012175"
+        rpy="0 0 0" />
+      <mass
+        value="5.3538" />
+      <inertia
+        ixx="0.04609582"
+        ixy="0.00043467"
+        ixz="1.785E-05"
+        iyy="0.04430159"
+        iyz="0.00014534"
+        izz="0.02076499" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Gento Skye urdf/meshes/waist_Link_2.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0 0 1 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Gento Skye urdf/meshes/waist_Link_2.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="waist_joint_2"
+    type="revolute">
+    <origin
+      xyz="0 0 0"
+      rpy="1.5708 0 0" />
+    <parent
+      link="waist_Link_1_prismatic" />
+    <child
+      link="waist_Link_2" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="-1.5708"
+      upper="0"
+      effort="194"
+      velocity="3.14" />
+  </joint>
+  <link
+    name="waist_Link_3">
+    <inertial>
+      <origin
+        xyz="0.0041391 9.144E-05 0.34664435"
+        rpy="0 0 0" />
+      <mass
+        value="17.4767" />
+      <inertia
+        ixx="0.36345315"
+        ixy="-0.00022069"
+        ixz="0.00340584"
+        iyy="0.33755628"
+        iyz="-0.00018698"
+        izz="0.16205022" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Gento Skye urdf/meshes/waist_Link_3.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="1 0 0 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Gento Skye urdf/meshes/waist_Link_3.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="waist_joint_3"
+    type="revolute">
+    <origin
+      xyz="0 0 0"
+      rpy="-1.5708 0 0" />
+    <parent
+      link="waist_Link_2" />
+    <child
+      link="waist_Link_3" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="-0.4363"
+      upper="0.4363"
+      effort="194"
+      velocity="3.14" />
+  </joint>
+
+
+  <link
+    name="Link1_R">
+    <inertial>
+      <origin
+        xyz="0.00011223 0.00593728  -0.04061573"
+        rpy="0 0 0" />
+      <mass
+        value="2.14768327" />
+      <inertia
+        ixx="0.00631026"
+        ixy="0.00000785"
+        ixz="0.00000275"
+        iyy="0.00666529"
+        iyz="0.00051846"
+        izz="0.00232406" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Gento Skye urdf/meshes/Link1_R.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0 1 0 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Gento Skye urdf/meshes/Link1_R.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Joint1_R"
+    type="revolute">
+    <origin
+      xyz="0 -0.2305 0.4335"
+      rpy="1.5708 0 0" />
+    <parent
+      link="waist_Link_3" />
+    <child
+      link="Link1_R" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="-3.1067"
+      upper="3.1067"
+      effort="108"
+      velocity="3.1416" />
+  </joint>
+  <link
+    name="Link2_R">
+    <inertial>
+      <origin
+        xyz="0.00013483 0.06170460 0.00950639"
+        rpy="0 0 0" />
+      <mass
+        value="2.24398" />
+      <inertia
+        ixx="0.01194933"
+        ixy="0.00000336"
+        ixz="0.00000091"
+        iyy="0.00361581"
+        iyz="-0.00132804"
+        izz="0.01098356" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Gento Skye urdf/meshes/Link2_R.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0 0 1 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Gento Skye urdf/meshes/Link2_R.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Joint2_R"
+    type="revolute">
+    <origin
+      xyz="0 0 0"
+      rpy="1.5708 0 0" />
+    <parent
+      link="Link1_R" />
+    <child
+      link="Link2_R" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="-2.0944"
+      upper="2.0944"
+      effort="108"
+      velocity="3.1416" />
+  </joint>
+  <link
+    name="Link3_R">
+    <inertial>
+      <origin
+        xyz="0.00968562 0.00246599 -0.04627302"
+        rpy="0 0 0" />
+      <mass
+        value="1.9242" />
+      <inertia
+        ixx="0.00718224"
+        ixy="0.00004413"
+        ixz="0.00089552"
+        iyy="0.00762563"
+        iyz="0.00022096"
+        izz="0.00178597" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Gento Skye urdf/meshes/Link3_R.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="1 0 0 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Gento Skye urdf/meshes/Link3_R.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Joint3_R"
+    type="revolute">
+    <origin
+      xyz="0 0.287 0"
+      rpy="-1.5708 0 0" />
+    <parent
+      link="Link2_R" />
+    <child
+      link="Link3_R" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="-3.1067"
+      upper="3.1067"
+      effort="66"
+      velocity="3.1416" />
+  </joint>
+  <link
+    name="Link4_R">
+    <inertial>
+      <origin
+        xyz="0.00850411 -0.04718223 0.00941509"
+        rpy="0 0 0" />
+      <mass
+        value="1.6085" />
+      <inertia
+        ixx="0.00580480"
+        ixy="-0.00066669"
+        ixz="-0.00012722"
+        iyy="0.00223807"
+        iyz="0.00070523"
+        izz="0.00533060" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Gento Skye urdf/meshes/Link4_R.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0 1 0 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Gento Skye urdf/meshes/Link4_R.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Joint4_R"
+    type="revolute">
+    <origin
+      xyz="0.018 0 0"
+      rpy="-1.5708 0 3.1416" />
+    <parent
+      link="Link3_R" />
+    <child
+      link="Link4_R" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="-2.5307"
+      upper="1.0472"
+      effort="66"
+      velocity="3.1416" />
+  </joint>
+  <link
+    name="Link5_R">
+    <inertial>
+      <origin
+        xyz="-0.00051127 -0.00101064 -0.11271739"
+        rpy="0 0 0" />
+      <mass
+        value="2.0883" />
+      <inertia
+        ixx="0.00626603"
+        ixy="0.00004009"
+        ixz="-0.00005338"
+        iyy="0.00564387"
+        iyz="0.00006193"
+        izz="0.00243632" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Gento Skye urdf/meshes/Link5_R.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0 0 1 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Gento Skye urdf/meshes/Link5_R.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Joint5_R"
+    type="revolute">
+    <origin
+      xyz="0.018 -0.314 0"
+      rpy="-1.5708 0 3.1416" />
+    <parent
+      link="Link4_R" />
+    <child
+      link="Link5_R" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="-3.1067"
+      upper="3.1067"
+      effort="18"
+      velocity="3.1416" />
+  </joint>
+  <link
+    name="Link6_R">
+    <inertial>
+      <origin
+        xyz="0.00032659 -0.00531336 0.00030182"
+        rpy="0 0 0" />
+      <mass
+        value="0.72496" />
+      <inertia
+        ixx="0.00046040"
+        ixy="-0.00000189"
+        ixz="-0.00000083"
+        iyy="0.00051716"
+        iyz="-0.00000346"
+        izz="0.00042521" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Gento Skye urdf/meshes/Link6_R.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="1 0 0 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Gento Skye urdf/meshes/Link6_R.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Joint6_R"
+    type="revolute">
+    <origin
+      xyz="0 0 0"
+      rpy="1.5708 -1.5708 0" />
+    <parent
+      link="Link5_R" />
+    <child
+      link="Link6_R" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="-1.0472"
+      upper="1.0472"
+      effort="18"
+      velocity="3.1416" />
+  </joint>
+  <link
+    name="Link7_R">
+    <inertial>
+      <origin
+        xyz="-0.00009108 -0.03153255 0.00889371"
+        rpy="0 0 0" />
+      <mass
+        value="0.68606" />
+      <inertia
+        ixx="0.00173687"
+        ixy="-0.00000345"
+        ixz="-0.00000116"
+        iyy="0.00089035"
+        iyz="0.00030680"
+        izz="0.00139406" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Gento Skye urdf/meshes/Link7_R.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0 1 0 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Gento Skye urdf/meshes/Link7_R.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Joint7_R"
+    type="revolute">
+    <origin
+      xyz="0 0 0"
+      rpy="1.5708 -1.5708 0" />
+    <parent
+      link="Link6_R" />
+    <child
+      link="Link7_R" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="-1.5708"
+      upper="1.5708"
+      effort="18"
+      velocity="3.1416" />
+  </joint>
+  <link
+    name="TCP_Link_R">
+    <inertial>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <mass
+        value="0" />
+      <inertia
+        ixx="0"
+        ixy="0"
+        ixz="0"
+        iyy="0"
+        iyz="0"
+        izz="0" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Gento Skye urdf/meshes/TCP_Link_R.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="1 1 1 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Gento Skye urdf/meshes/TCP_Link_R.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="JointTCP_R"
+    type="fixed">
+    <origin
+      xyz="0 -0.095 0"
+      rpy="1.5708 -1.5708 0" />
+    <parent
+      link="Link7_R" />
+    <child
+      link="TCP_Link_R" />
+    <axis
+      xyz="0 0 0" />
+  </joint>
+<link
+    name="Link8_R">
+    <inertial>
+      <origin
+        xyz="0.114173673705173 1.14500734671452E-07 0.0234553428952367"
+        rpy="0 0 0" />
+      <mass
+        value="0.0880205156348504" />
+      <inertia
+        ixx="0.000108662771638114"
+        ixy="-6.3925533063502E-10"
+        ixz="-3.88093499443002E-05"
+        iyy="0.000118230682353423"
+        iyz="-2.130052703709E-10"
+        izz="4.40320418563213E-05" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Gento Skye urdf/meshes/Link8_R.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="1 1 1 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Gento Skye urdf/meshes/Link8_R.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Joint8_R"
+    type="fixed">
+    <origin
+      xyz="0 0 0"
+      rpy="0 0 0" />
+    <parent
+      link="TCP_Link_R" />
+    <child
+      link="Link8_R" />
+    <axis
+      xyz="0 0 0" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+
+  <link
+ name="Link_Right_wrist">
+    <inertial>
+      <origin
+        xyz="0.0717359763450741 0.0442631391055814 -0.0224446909407665"
+        rpy="0 0 0" />
+      <mass
+        value="5.38320568530609" />
+      <inertia
+        ixx="0.0152058025502204"
+        ixy="-0.00178829198094161"
+        ixz="-0.00146034276793319"
+        iyy="0.0216384979545458"
+        iyz="-0.00271933560557955"
+        izz="0.0203994220827433" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Gento Skye urdf/meshes/Link_Right_wrist.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.792156862745098 0.819607843137255 0.933333333333333 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Gento Skye urdf/meshes/Link_Right_wrist.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Joint_Right_wrist"
+    type="fixed">
+    <origin
+      xyz="0.06 0 0.057822"
+      rpy="-1.5707  -0.00012967 1.3615" /> />
+    <parent
+      link="Link8_R" />
+    <child
+      link="Link_Right_wrist" />
+    <axis
+      xyz="0 0 0" />
+  </joint>
+  <link
+name="Arm_R9_Link">
+    <inertial>
+      <origin
+        xyz="0 0 0 "
+        rpy="0 0 0" />
+      <mass
+        value="0.21436" />
+      <inertia
+        ixx="0.00017299"
+        ixy="4.2904E-07"
+        ixz="4.2578E-07"
+        iyy="0.00021771"
+        iyz="1.5375E-09"
+        izz="9.8853E-05" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Gento Skye urdf/meshes/Arm_R9_Link.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0 0 1 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Gento Skye urdf/meshes/Arm_R9_Link.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Arm_R9_Joint"
+    type="fixed">
+    <origin
+        xyz="0 0 -0.038"
+      rpy="-1.5708 0 -3.1416" />
+    <parent
+      link="Link8_R" />
+    <child
+      link="Arm_R9_Link" />
+    <axis
+      xyz="0 0 -1" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="Arm_R10_Link">
+    <inertial>
+      <origin
+        xyz="-0.00090072 -0.14322 0.057244"
+        rpy="0 0 0" />
+      <mass
+        value="0.027748" />
+      <inertia
+        ixx="9.6216E-06"
+        ixy="-9.9808E-08"
+        ixz="1.7315E-08"
+        iyy="3.5256E-06"
+        iyz="-1.3005E-06"
+        izz="1.0224E-05" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Gento Skye urdf/meshes/Arm_R10_Link.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="1 0 0 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Gento Skye urdf/meshes/Arm_R10_Link.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Arm_R10_Joint"
+    type="prismatic">
+    <origin
+      xyz="0 0 0"
+      rpy="0 0 0" />
+    <parent
+      link="Arm_R9_Link" />
+    <child
+      link="Arm_R10_Link" />
+    <axis
+      xyz="0 0 -1" />
+    <limit
+      lower="0"
+      upper="0.04"
+      effort="30"
+      velocity="0" />
+  </joint>
+  <link
+    name="Arm_R11_Link">
+    <inertial>
+      <origin
+        xyz="-0.00044761 1.9362 0.057244"
+        rpy="0 0 0" />
+      <mass
+        value="0.027748" />
+      <inertia
+        ixx="9.6216E-06"
+        ixy="-9.9808E-08"
+        ixz="-1.7315E-08"
+        iyy="3.5256E-06"
+        iyz="1.3005E-06"
+        izz="1.0224E-05" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Gento Skye urdf/meshes/Arm_R11_Link.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="1 0 0 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Gento Skye urdf/meshes/Arm_R11_Link.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Arm_R11_Joint"
+    type="prismatic">
+    <origin
+      xyz="0.0013483 1.793 0"
+      rpy="-3.1416 0 0" />
+    <parent
+      link="Arm_R9_Link" />
+    <child
+      link="Arm_R11_Link" />
+    <axis
+      xyz="0 0 -1" />
+    <limit
+      lower="0"
+      upper="0.04"
+      effort="30"
+      velocity="0" />
+   <mimic joint="Arm_R10_Joint" multiplier="1" offset="0" />
+  </joint>
+
+  <link
+    name="Link1_L">
+    <inertial>
+      <origin
+        xyz="0.00011223 0.00593728  -0.04061573"
+        rpy="0 0 0" />
+      <mass
+        value="2.14768327" />
+      <inertia
+        ixx="0.00631026"
+        ixy="0.00000785"
+        ixz="0.00000275"
+        iyy="0.00666529"
+        iyz="0.00051846"
+        izz="0.00232406" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Gento Skye urdf/meshes/Link1_L.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0 1 0 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Gento Skye urdf/meshes/Link1_L.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Joint1_L"
+    type="revolute">
+    <origin
+      xyz="0 0.2305 0.4425"
+      rpy="-1.5708 0 0" />
+    <parent
+      link="waist_Link_3" />
+    <child
+      link="Link1_L" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="Link2_L">
+    <inertial>
+      <origin
+        xyz="0.00013483 0.06170460 0.00950639"
+        rpy="0 0 0" />
+      <mass
+        value="2.24398" />
+      <inertia
+        ixx="0.01194933"
+        ixy="0.00000336"
+        ixz="0.00000091"
+        iyy="0.00361581"
+        iyz="-0.00132804"
+        izz="0.01098356" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Gento Skye urdf/meshes/Link2_L.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0 0 1 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Gento Skye urdf/meshes/Link2_L.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Joint2_L"
+    type="revolute">
+    <origin
+      xyz="0 0 0"
+      rpy="1.5708 0 0" />
+    <parent
+      link="Link1_L" />
+    <child
+      link="Link2_L" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="-2.0944"
+      upper="2.0944"
+      effort="108"
+      velocity="3.1416" />
+  </joint>
+  <link
+    name="Link3_L">
+    <inertial>
+      <origin
+        xyz="0.00968562 0.00246599 -0.04627302"
+        rpy="0 0 0" />
+      <mass
+        value="1.9242" />
+      <inertia
+        ixx="0.00718224"
+        ixy="0.00004413"
+        ixz="0.00089552"
+        iyy="0.00762563"
+        iyz="0.00022096"
+        izz="0.00178597" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Gento Skye urdf/meshes/Link3_L.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="1 0 0 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Gento Skye urdf/meshes/Link3_L.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Joint3_L"
+    type="revolute">
+    <origin
+      xyz="0 0.287 0"
+      rpy="-1.5708 0 0" />
+    <parent
+      link="Link2_L" />
+    <child
+      link="Link3_L" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="-3.1067"
+      upper="3.1067"
+      effort="66"
+      velocity="3.1416" />
+  </joint>
+  <link
+    name="Link4_L">
+    <inertial>
+      <origin
+        xyz="0.00850411 -0.04718223 0.00941509"
+        rpy="0 0 0" />
+      <mass
+        value="1.6085" />
+      <inertia
+        ixx="0.00580480"
+        ixy="-0.00066669"
+        ixz="-0.00012722"
+        iyy="0.00223807"
+        iyz="0.00070523"
+        izz="0.00533060" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Gento Skye urdf/meshes/Link4_L.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0 1 0 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Gento Skye urdf/meshes/Link4_L.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Joint4_L"
+    type="revolute">
+    <origin
+      xyz="0.018 0 0"
+      rpy="-1.5708 0 3.1416" />
+    <parent
+      link="Link3_L" />
+    <child
+      link="Link4_L" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="-2.5307"
+      upper="1.0472"
+      effort="66"
+      velocity="3.1416" />
+  </joint>
+  <link
+    name="Link5_L">
+    <inertial>
+      <origin
+        xyz="0.00051127 0.00101064 -0.11271739"
+        rpy="0 0 0" />
+      <mass
+        value="2.0883" />
+      <inertia
+        ixx="0.00626603"
+        ixy="0.00004009"
+        ixz="0.00005338"
+        iyy="0.00564387"
+        iyz="-0.00006193"
+        izz="0.00243632" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Gento Skye urdf/meshes/Link5_L.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0 0 1 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Gento Skye urdf/meshes/Link5_L.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Joint5_L"
+    type="revolute">
+    <origin
+      xyz="0.018 -0.314 0"
+      rpy="-1.5708 0 3.1416" />
+    <parent
+      link="Link4_L" />
+    <child
+      link="Link5_L" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="-3.1067"
+      upper="3.1067"
+      effort="18"
+      velocity="3.1416" />
+  </joint>
+  <link
+    name="Link6_L">
+    <inertial>
+      <origin
+        xyz="0.00032659 0.00531336 -0.00030182"
+        rpy="0 0 0" />
+      <mass
+        value="0.72496" />
+      <inertia
+        ixx="0.00046040"
+        ixy="0.00000189"
+        ixz="0.00000083"
+        iyy="0.00051716"
+        iyz="-0.00000346"
+        izz="0.00042521" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Gento Skye urdf/meshes/Link6_L.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="1 0 0 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Gento Skye urdf/meshes/Link6_L.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Joint6_L"
+    type="revolute">
+    <origin
+      xyz="0 0 0"
+      rpy="1.5708 -1.5708 0" />
+    <parent
+      link="Link5_L" />
+    <child
+      link="Link6_L" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="-1.0472"
+      upper="1.0472"
+      effort="18"
+      velocity="3.1416" />
+  </joint>
+  <link
+    name="Link7_L">
+    <inertial>
+      <origin
+        xyz="-0.00009108 -0.03153255 0.00889371"
+        rpy="0 0 0" />
+      <mass
+        value="0.68606" />
+      <inertia
+        ixx="0.00173687"
+        ixy="-0.00000345"
+        ixz="-0.00000116"
+        iyy="0.00089035"
+        iyz="0.00030680"
+        izz="0.00139406" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Gento Skye urdf/meshes/Link7_L.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0 1 0 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Gento Skye urdf/meshes/Link7_L.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Joint7_L"
+    type="revolute">
+    <origin
+      xyz="0 0 0"
+      rpy="1.5708 -1.5708 0" />
+    <parent
+      link="Link6_L" />
+    <child
+      link="Link7_L" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="-1.5708"
+      upper="1.5708"
+      effort="18"
+      velocity="3.1416" />
+  </joint>
+  <link
+    name="TCP_Link_L">
+    <inertial>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <mass
+        value="0" />
+      <inertia
+        ixx="0"
+        ixy="0"
+        ixz="0"
+        iyy="0"
+        iyz="0"
+        izz="0" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Gento Skye urdf/meshes/TCP_Link_L.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="1 1 1 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Gento Skye urdf/meshes/TCP_Link_L.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="JointTCP_L"
+    type="fixed">
+    <origin
+      xyz="0 -0.095 0"
+      rpy="1.5708 -1.5708 0" />
+    <parent
+      link="Link7_L" />
+    <child
+      link="TCP_Link_L" />
+    <axis
+      xyz="0 0 0" />
+  </joint>
+<link
+    name="Link8_L">
+    <inertial>
+      <origin
+        xyz="1.1276190270415E-07 -0.11417365347384 0.0234553552836059"
+        rpy="0 0 0" />
+      <mass
+        value="0.088020543548932" />
+      <inertia
+        ixx="0.000118230671508944"
+        ixy="6.60824120380282E-10"
+        ixz="-2.10338428639125E-10"
+        iyy="0.00010866282572157"
+        iyz="3.88093041447579E-05"
+        izz="4.4031984148421E-05" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Gento Skye urdf/meshes/Link8_L.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="1 1 1 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Gento Skye urdf/meshes/Link8_L.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Joint8_L"
+    type="fixed">
+    <origin
+      xyz="0 0 0"
+      rpy="0 0 0" />
+    <parent
+      link="TCP_Link_L" />
+    <child
+      link="Link8_L" />
+    <axis
+      xyz="0 0 0" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+<link
+    name="Link_Left_wrist">
+    <inertial>
+      <origin
+        xyz="0.022446638135212 0.0442631448823432 0.0717353604419828"
+        rpy="0 0 0" />
+      <mass
+        value="5.38320837672175" />
+      <inertia
+        ixx="0.0203995050043586"
+        ixy="0.00271928690211307"
+        ixz="0.00146020444332052"
+        iyy="0.0216385038249464"
+        iyz="-0.00178836359279817"
+        izz="0.0152057269287356" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Gento Skye urdf/meshes/Link_Left_wrist.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.792156862745098 0.819607843137255 0.933333333333333 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Gento Skye urdf/meshes/Link_Left_wrist.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Joint_Left_wrist"
+    type="fixed">
+    <origin
+     xyz="0.06 0 0.057822"
+      rpy="-1.5707  -0.00012967 1.3615" />
+    <parent
+      link="Link8_L" />
+    <child
+      link="Link_Left_wrist" />
+    <axis
+      xyz="0 0 0" />
+  </joint>
+<link
+    name="Arm_L9_Link">
+    <inertial>
+      <origin
+        xyz="-0.0015934 -0.085718 1.7355E-06"
+        rpy="0 0 0" />
+      <mass
+        value="0.21436" />
+      <inertia
+        ixx="0.00017299"
+        ixy="4.2902E-07"
+        ixz="4.2581E-07"
+        iyy="0.00021771"
+        iyz="1.6026E-09"
+        izz="9.8853E-05" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Gento Skye urdf/meshes/Arm_L9_Link.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0 0 1 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Gento Skye urdf/meshes/Arm_L9_Link.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Arm_L9_Joint"
+    type="fixed">
+    <origin
+         xyz="0 0 -0.038"
+      rpy="-1.5708 0 3.1416" />
+    <parent
+      link="Link8_L" />
+    <child
+      link="Arm_L9_Link" />
+    <axis
+      xyz="0 0 0" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="Arm_L10_Link">
+    <inertial>
+      <origin
+        xyz="-0.00090072 -0.14322 0.057244"
+        rpy="0 0 0" />
+      <mass
+        value="0.027748" />
+      <inertia
+        ixx="9.6216E-06"
+        ixy="-9.9808E-08"
+        ixz="1.7315E-08"
+        iyy="3.5256E-06"
+        iyz="-1.3005E-06"
+        izz="1.0224E-05" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Gento Skye urdf/meshes/Arm_L10_Link.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="1 0 0 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Gento Skye urdf/meshes/Arm_L10_Link.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Arm_L10_Joint"
+    type="prismatic">
+    <origin
+      xyz="0 0 0"
+      rpy="0 0 0" />
+    <parent
+      link="Arm_L9_Link" />
+    <child
+      link="Arm_L10_Link" />
+    <axis
+       xyz="0 0 -1" />
+    <limit
+      lower="0"
+      upper="0.04"
+      effort="30"
+      velocity="0" />
+  </joint>
+  <link
+    name="Arm_L11_Link">
+    <inertial>
+      <origin
+        xyz="0.00090072 -0.14322 -0.057244"
+        rpy="0 0 0" />
+      <mass
+        value="0.027748" />
+      <inertia
+        ixx="9.6216E-06"
+        ixy="9.9808E-08"
+        ixz="1.7315E-08"
+        iyy="3.5256E-06"
+        iyz="1.3005E-06"
+        izz="1.0224E-05" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Gento Skye urdf/meshes/Arm_L11_Link.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="1 0 0 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Gento Skye urdf/meshes/Arm_L11_Link.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Arm_L11_Joint"
+    type="prismatic">
+    <origin
+      xyz="0 0 0"
+      rpy="0 0 0" />
+    <parent
+      link="Arm_L9_Link" />
+    <child
+      link="Arm_L11_Link" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="0"
+      upper="0.04"
+      effort="30"
+      velocity="0" />
+     <mimic joint="Arm_L10_Joint" multiplier="1" offset="0" />
+  </joint>
+  <link
+    name="head_Link_1">
+    <inertial>
+      <origin
+        xyz="-0.00036181 -0.012522 -0.017538"
+        rpy="0 0 0" />
+      <mass
+        value="1.3932" />
+      <inertia
+        ixx="0.0032973"
+        ixy="6.6693E-06"
+        ixz="-4.9573E-05"
+        iyy="0.003207"
+        iyz="0.00030602"
+        izz="0.0016203" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Gento Skye urdf/meshes/head_Link_1.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0 1 0 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Gento Skye urdf/meshes/head_Link_1.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="head_joint_1"
+    type="revolute">
+    <origin
+      xyz="-0.0135 0 0.648"
+      rpy="0 0 0" />
+    <parent
+      link="waist_Link_3" />
+    <child
+      link="head_Link_1" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="-1.5708"
+      upper="1.5708"
+      effort="22"
+      velocity="3.14" />
+  </joint>
+  <link
+    name="head_Link_2">
+    <inertial>
+      <origin
+        xyz="0.05658 0.029152 -0.018873"
+        rpy="0 0 0" />
+      <mass
+        value="1.0577" />
+      <inertia
+        ixx="0.00480604"
+        ixy="0.0009986"
+        ixz="0.00088202"
+        iyy="0.00414727"
+        iyz="0.00057025"
+        izz="0.0053477" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Gento Skye urdf/meshes/head_Link_2.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0 0 1 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Gento Skye urdf/meshes/head_Link_2.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="head_joint_2"
+    type="revolute">
+    <origin
+      xyz="0 0 0"
+      rpy="1.5708 0 0" />
+    <parent
+      link="head_Link_1" />
+    <child
+      link="head_Link_2" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="-0.6109"
+      upper="0.4363"
+      effort="22"
+      velocity="3.14" />
+  </joint>
+  <link
+    name="head depth camera_Link">
+    <inertial>
+      <origin
+        xyz="-0.0155 -0.00004 -0.01274"
+        rpy="0 0 0" />
+      <mass
+        value="0.075" />
+      <inertia
+        ixx="0.00000925"
+        ixy="-0.00000005"
+        ixz="-0.00000049"
+        iyy="0.00005036"
+        iyz="-0.00000001"
+        izz="0.00004973" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Gento Skye urdf/meshes/head depth camera_Link.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="1 0 0 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Gento Skye urdf/meshes/head depth camera_Link.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="head depth camera_joint"
+    type="fixed">
+    <origin
+      xyz="0.11485 0.064903 -0.0175"
+      rpy="0 1.5708 0" />
+    <parent
+      link="head_Link_2" />
+    <child
+      link="head depth camera_Link" />
+    <axis
+      xyz="0 0 0" />
+  </joint>
+  <link
+    name="left eye camera_Link">
+    <inertial>
+      <origin
+        xyz="0.00000454 -0.00014879 -0.01886554"
+        rpy="0 0 0" />
+      <mass
+        value="0.05" />
+      <inertia
+        ixx="0.00000491"
+        ixy="0"
+        ixz="0"
+        iyy="0.00000489"
+        iyz="0.00000011"
+        izz="0.00000453" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Gento Skye urdf/meshes/left eye camera_Link.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="1 0 0 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Gento Skye urdf/meshes/left eye camera_Link.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="left eye camera_joint"
+    type="fixed">
+    <origin
+      xyz="0.1162 0.1084 -0.02977"
+      rpy="0 1.5708 0" />
+    <parent
+      link="head_Link_2" />
+    <child
+      link="left eye camera_Link" />
+    <axis
+      xyz="0 0 0" />
+  </joint>
+  <link
+    name="right eye camera_Link">
+    <inertial>
+      <origin
+        xyz="0.00000454 -0.00014879 -0.01886554"
+        rpy="0 0 0" />
+      <mass
+        value="0.05" />
+      <inertia
+        ixx="0.00000491"
+        ixy="0"
+        ixz="0"
+        iyy="0.00000489"
+        iyz="0.00000011"
+        izz="0.00000453" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Gento Skye urdf/meshes/right eye camera_Link.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="1 0 0 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Gento Skye urdf/meshes/right eye camera_Link.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="right eye camera_joint"
+    type="fixed">
+    <origin
+      xyz="0.1162 0.1084 0.03023"
+      rpy="0 1.5708 0" />
+    <parent
+      link="head_Link_2" />
+    <child
+      link="right eye camera_Link" />
+    <axis
+      xyz="0 0 0" />
+  </joint>
+  <link
+    name="waist depth camera_Link">
+    <inertial>
+      <origin
+        xyz="-0.0155 -0.00004 -0.01274"
+        rpy="0 0 0" />
+      <mass
+        value="0.075" />
+      <inertia
+        ixx="0.00000925"
+        ixy="-0.00000005"
+        ixz="-0.00000049"
+        iyy="0.00005036"
+        iyz="-0.00000001"
+        izz="0.00004973" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Gento Skye urdf/meshes/waist depth camera_Link.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0 1 0 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Gento Skye urdf/meshes/waist depth camera_Link.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="waist depth camera_joint"
+    type="fixed">
+    <origin
+      xyz="0.13079 0.0175 0.27246"
+      rpy="1.8326 0 1.5708" />
+    <parent
+      link="waist_Link_3" />
+    <child
+      link="waist depth camera_Link" />
+    <axis
+      xyz="0 0 0" />
+  </joint>
+</robot>
