@@ -34,8 +34,8 @@ class Config:
         [-90, -64, 67, -89, 24, -8, -17],
     ])
     receive: list = field(default_factory=lambda: [
-        [85, -70, -60, -90, 15, 0, 10],
-        [-85, -70, 60, -90, -15, 0, -10],
+        [29.327, -48.5, -1.148, -93.315, 21.408, 17.679, -70.715],
+        [-29.327, -48.5, 1.148, -93.315, -21.408, 17.679, 70.715],
     ])
     # Only these explicitly listed axes are effective; remaining SDK slots are padding.
     body: list = field(default_factory=lambda: [0, 0])
