@@ -2,7 +2,7 @@
 """job_wrap.py JOB -- CMD ARGS...   run a motion job, append its output to run.log and keep job_status.json
 up to date:  {"state": "running"|"done"|"failed", "job": JOB, "final": <FINAL line>, "error": <ABORT line>}.
 "done" means the job exited 0 AND reported where it stopped (FINAL / STAGE-ONLY)."""
-import json, os, subprocess, sys, time
+import json, os, re, subprocess, sys, time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 LOG, JS = os.path.join(HERE, 'run.log'), os.path.join(HERE, 'job_status.json')
@@ -21,8 +21,9 @@ with open(LOG, 'a') as log:
     p = subprocess.Popen(cmd, cwd=HERE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
     for line in p.stdout:
         log.write(line); log.flush()
-        if line.startswith(('FINAL', 'STAGE-ONLY')):
-            final = line.strip()
+        body = re.sub(r'^\[\s*[\d.]+s\]\s*', '', line)      # dock.py log lines carry an elapsed-time prefix
+        if body.startswith(('FINAL', 'STAGE-ONLY')):
+            final = body.strip()
         elif 'ABORT' in line:
             error = line.strip()
     rc = p.wait()
