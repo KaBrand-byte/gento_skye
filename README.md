@@ -10,20 +10,6 @@
 - [原厂资料说明](<项目文件/Gento Skye资料/原厂资料说明.md>)
 - [进度交接](handoff.md)
 
-## Git 版本管理
-
-代码、配置、实验记录和原厂资料纳入 Git。`runs/` 运行结果、Python 缓存、虚拟环境、本机编辑器配置和环境变量文件由 `.gitignore` 排除；重要实验结论整理到 `docs/experiments/` 后提交。
-
-修改后先查看差异并运行离线测试，再按功能提交：
-
-```bash
-git status
-git diff
-python3 -m unittest discover -s tests -v
-git add <需要提交的文件>
-git diff --cached
-git commit -m "说明本次修改"
-```
 
 ## 双臂空载动作程序
 
@@ -51,7 +37,7 @@ python3 -m skye_task plan-check --config config/default.json
 python3 -m skye_task run --config config/default.json --result runs/latest.json
 ```
 
-`run` 会立即连接 `6.6.7.190`、进入位置模式并运动到准备位和接盘位。每个点位先执行双臂 MoveJ，再单独调整升降并等待稳定；接盘高度到位后，按一次 Enter 触发余下动作，之后没有人工继续节点。等待触发时仍检查双臂与固定部件反馈。Ctrl-C / SIGTERM 请求停止双臂轨迹；若升降正在调整，则同时请求保持其当前反馈位置。`Sequence.request_stop()` 是程序调用入口。停止会在当前 SDK 调用返回后的检查点处理，不能替代硬件急停。
+`run` 会立即连接 `6.6.7.190`、进入位置模式并运动到准备位和接盘位。每个点位先执行双臂 MoveJ，再单独调整升降并等待稳定；接盘高度到位后，按一次 Enter 触发余下动作，之后没有人工继续节点。等待触发时仍检查双臂与固定部件反馈。Ctrl-C / SIGTERM 请求停止双臂轨迹；若升降正在调整，则同时请求保持其当前反馈位置。`Sequence.request_stop()` 是程序调用入口。
 
 连接、规划、上传、启动、执行或超时失败均终止推进并请求停止双臂，无自动重试、自动松爪、自动下使能或自动收臂。正常完成后保持准备位的位置控制；退出时释放 SDK 连接和运动学资源。
 
@@ -61,7 +47,7 @@ python3 -m skye_task run --config config/default.json --result runs/latest.json
 
 | 项目 | 约定 |
 | --- | --- |
-| SDK／控制器 | 版本前缀必须为 `000407`，PATCH 可不同；运行时核对 GentoSkye 型号及有效自由度 |
+| SDK／控制器 | 版本前缀必须为 `000407` |
 | 关节和姿态角 | °；MoveJ 规划比例为 `(0, 1]`，默认速度／加速度均 0.1 |
 | 直线运动 | mm、mm/s、mm/s²；默认速度／加速度均 100 |
 | 运行比例 | 两臂设为 100%，由规划参数决定速度；模式切换比例默认 10% |
