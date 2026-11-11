@@ -250,6 +250,7 @@ def plan_approach(m, st, gap):
         if sz is None:
             raise SystemExit('ABORT: cannot see the surface the tray goes on')
         need_clear(RM.place_hits(p - np.array([0.0, dy, 0.0]), CFG, fwd, sz), 'place spot under the tray')
+        need_clear(RM.place_motion_hits(p - np.array([0.0, dy, 0.0]), CFG, fwd, sz), 'place motion after docking')
     return dict(dy=round(dy, 4), fwd=round(fwd, 4), surface=sz)
 
 
@@ -412,29 +413,38 @@ elif cmd in ('dock', 'redock'):
         # untaught station (demo): no lateral target - drive straight in from the current lateral position,
         # up to the requested gap or, with --closest, as far as the robot + arms + tray stay clear
         fwd = m['dist'] - FRONT - gap
-        pw = RM.remove_self(cloud(), CFG); blocked = RM.sweep_hits(pw, CFG, fwd, 0.0)
-        if blocked:
+        pw = RM.remove_self(cloud(), CFG); sz = RM.surface_height(pw, m['dist'])
+        place = bool(st.get('place'))
+
+        def blocked_at(f_):
+            # the straight approach AND (place stations) the place motion run afterwards must be clear
+            return RM.sweep_hits(pw, CFG, f_, 0.0) or (RM.place_motion_hits(pw, CFG, f_, sz) if place else None)
+        why = blocked_at(fwd); reached = why is None
+        if why:
             if '--closest' not in sys.argv:
-                need_clear(blocked, 'straight approach')
-            ok = 0.0
-            for f_ in np.arange(0.01, fwd + 1e-9, 0.01):
+                need_clear(why, 'straight approach / place motion')
+            ok = None
+            for f_ in np.arange(0.0, fwd + 1e-9, 0.01):
                 if RM.sweep_hits(pw, CFG, float(f_), 0.0):
                     break
-                ok = float(f_)
+                if not place or not RM.place_motion_hits(pw, CFG, float(f_), sz):
+                    ok = float(f_)
+            if ok is None:
+                raise SystemExit('ABORT: no position on this line where the approach and the place motion are '
+                                 'clear: %s' % json.dumps(why))
             log('requested gap %.3f is blocked by %s -> stopping early, forward %.3f m (gap %.3f)'
-                % (gap, json.dumps(blocked), ok, m['dist'] - FRONT - ok))
+                % (gap, json.dumps(why), ok, m['dist'] - FRONT - ok))
             fwd = ok
-        log('forward %.3f m from the current lateral position' % fwd)
+        log('forward %.3f m from the current lateral position (surface top %s m)' % (fwd, None if sz is None else round(sz, 3)))
         if fwd > MAX_FWD:
             raise SystemExit('ABORT: forward %.3f too long' % fwd)
-        sz = RM.surface_height(pw, m['dist'])
-        if st.get('place') and sz is not None:
-            log('place spot check at this pose:', json.dumps(RM.place_hits(pw, CFG, fwd, sz)) or 'clear (surface %.2f m)' % sz)
         if not dry and fwd > 0.005:
             rel(fwd + FWD_SHORT, 0.0)
+        if not dry:
             f = measure(near=True)
             log('FINAL', json.dumps(dict(name=name, mode='here', gap_target=gap, gap=f['gap'] if f else None,
-                                          ang_deg=f['ang_deg'] if f else None, fwd=round(fwd, 4))))
+                                          ang_deg=f['ang_deg'] if f else None, fwd=round(fwd, 4),
+                                          reached_gap=reached, place_motion_clear=place)))
             json.dump(dict(fwd=fwd + FWD_SHORT, gap=gap, t=time.time()), open('/tmp/claude_dock_last.json', 'w'))
         if not dry:
             setmode(0)

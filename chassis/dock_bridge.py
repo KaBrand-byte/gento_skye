@@ -56,12 +56,16 @@ class Bridge(Node):
             args = ['stop']
         elif c.get('cmd') == 'tune':
             args = ['tune', str(c['station']), str(c['key']), str(float(c['value']))]
+        elif c.get('cmd') == 'selfscan':            # no motion: measure arms/tray, store in robot_model.json
+            args = ['selfscan']
+        elif c.get('cmd') == 'check':               # no motion: what docking at a station would do from here
+            args = ['check', str(c['station'])]
         else:
             self.ack = {'id': cid, 'ok': False, 'out': 'unknown command: %s' % msg.data}; self.publish(); return
         self.get_logger().info('cmd %s: %s' % (cid, ' '.join(args)))
 
         def run():
-            r = subprocess.run(RUN + args, capture_output=True, text=True, timeout=60)
+            r = subprocess.run(RUN + args, capture_output=True, text=True, timeout=150)
             out = (r.stdout + r.stderr).strip()
             ok = r.returncode == 0 and 'BUSY' not in out and 'unknown station' not in out
             self.ack = {'id': cid, 'ok': ok, 'out': out[-400:]}; self.publish()

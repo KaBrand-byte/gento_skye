@@ -35,6 +35,9 @@ DEFAULT = {
     },
     'margin': 0.05,           # clearance for turning (the arms/tray swing out)
     'margin_straight': 0.03,  # clearance for slow straight moves (lidar accuracy ~1 cm)
+    # the (hard-coded) place motion after docking: forward, down, then each hand sideways out (skye_task
+    # forward_mm / down_mm / left_exit_mm / right_exit_mm, in metres)
+    'place_motion': {'forward': 0.10, 'down': 0.10, 'side': 0.10},
 }
 
 
@@ -132,6 +135,23 @@ def place_hits(p, cfg, dx, surface_z, clear=0.02):
     sel = ((q[:, 0] > t[0] - m) & (q[:, 0] < t[1] + m) & (q[:, 1] > t[2] - m) & (q[:, 1] < t[3] + m)
            & (q[:, 2] > surface_z + clear) & (q[:, 2] < t[4]))      # no margin below: the surface itself is expected
     return _report(p, sel, 'place spot (surface %.2f m)' % surface_z)
+
+
+def place_motion_hits(p, cfg, dx, surface_z, clear=0.02):
+    """At the docked pose (after moving dx forward) the arms + tray run the place motion: forward, down, and
+    the hands out to the sides.  The space this sweeps must be free, except the work surface itself (anything
+    standing more than `clear` above it - a frame over the belt, an item, a hand - counts)."""
+    pm = cfg['place_motion']; m = cfg.get('margin_straight', 0.03)
+    p = remove_self(p, cfg); q = p - np.array([dx, 0.0, 0.0])
+    hit = np.zeros(len(p), bool)
+    for name, b in boxes(cfg):
+        if name not in ('arms', 'tray'):
+            continue
+        env = [b[0], b[1] + pm['forward'], b[2] - pm['side'], b[3] + pm['side'], b[4] - pm['down'], b[5]]
+        floor = max(env[4], (surface_z + clear) if surface_z is not None else env[4])
+        hit |= ((q[:, 0] > env[0] - m) & (q[:, 0] < env[1] + m) & (q[:, 1] > env[2] - m) & (q[:, 1] < env[3] + m)
+                & (q[:, 2] > floor) & (q[:, 2] < env[5] + m))
+    return _report(p, hit, 'place motion (forward %.2f, down %.2f, sides %.2f m)' % (pm['forward'], pm['down'], pm['side']))
 
 
 def surface_height(p, face_dist, depth=0.35):

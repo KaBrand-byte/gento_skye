@@ -150,6 +150,26 @@ class GentoNavigation:
             self._ssh("stop")
         self.active = None
 
+    def _query(self, timeout, **command):
+        if self.transport == "ros":
+            saved, self.ack_timeout = self.ack_timeout, timeout
+            try:
+                ack = self._ros_command(**command)
+            finally:
+                self.ack_timeout = saved
+            return ack.get("out", "")
+        args = [command["cmd"]] + ([command["station"]] if "station" in command else [])
+        return self._ssh(*args, timeout=timeout)
+
+    def selfscan(self):
+        """No motion: measure the arms (+tray) with the lidar and store them on the chassis.
+        Needs nothing else within ~1 m in front of the robot; arms in the carry pose."""
+        return self._query(90.0, cmd="selfscan")
+
+    def check(self, destination):
+        """No motion: report what docking at `destination` would do from the current pose."""
+        return self._query(120.0, cmd="check", station=destination)
+
     def tune(self, destination, key, value):
         """Persist a fine-tune value on the chassis: gap (m) | lat_offset (m, + left) | yaw_offset (deg, + left)."""
         if self.transport == "ros":
