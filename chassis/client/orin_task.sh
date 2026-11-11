@@ -20,15 +20,21 @@ env_setup() {
   cd "$REPO"
 }
 case "${1:-start}" in
-  run)        # internal: what runs inside tmux
-    shift; env_setup
+  run)        # internal: what runs inside tmux; the window always stays open so errors can be read
+    shift; set +e; env_setup
     python3 chassis/client/run_task_with_navigation.py --config "${GENTO_TASK_CONFIG:-config/default.json}" "$@"
-    echo; echo "task finished - result in $REPO/runs/with-navigation.json; press Enter to close"; read -r _ ;;
+    rc=$?
+    echo; echo "task finished (exit $rc) - result in $REPO/runs/with-navigation.json; press Enter to close"; read -r _ ;;
   start)
     shift
+    # tmux needs a usable terminal type (Windows ssh -t may send none or one the Orin does not know)
+    if [ -z "$TERM" ] || [ "$TERM" = dumb ] || ! infocmp "$TERM" >/dev/null 2>&1; then export TERM=xterm-256color; fi
     if tmux has-session -t $SESSION 2>/dev/null; then echo "task already running - attaching"; exec tmux attach -t $SESSION; fi
-    tmux new-session -s $SESSION "bash '$REPO/chassis/client/orin_task.sh' run $(printf '%q ' "$@")" ;;
-  attach)     exec tmux attach -t $SESSION ;;
+    ARGS=""; [ $# -gt 0 ] && ARGS=$(printf '%q ' "$@")      # no args: forward nothing (printf would emit '')
+    tmux new-session -s $SESSION "bash '$REPO/chassis/client/orin_task.sh' run $ARGS" ;;
+  attach)
+    if [ -z "$TERM" ] || [ "$TERM" = dumb ] || ! infocmp "$TERM" >/dev/null 2>&1; then export TERM=xterm-256color; fi
+    exec tmux attach -t $SESSION ;;
   stop)
     tmux send-keys -t $SESSION C-c 2>/dev/null && echo "Ctrl-C sent to the task" || echo "no task session"
     env_setup
