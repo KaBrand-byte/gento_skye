@@ -17,7 +17,9 @@ from .sequence import Result, Sequence, Stopped
 
 
 def wait_for_start(sequence):
-    print("已到接盘位。按 Enter 触发空载任务，Ctrl-C 停止。", flush=True)
+    message = ("已到接盘位且双爪张开。递盘就绪后按 Enter 闭爪并执行任务，Ctrl-C 停止。"
+               if sequence.config.gripper_enabled else "已到接盘位。按 Enter 触发空载任务，Ctrl-C 停止。")
+    print(message, flush=True)
     while True:
         sequence.checked_feedback()
         readable, _, _ = select.select([sys.stdin], [], [], sequence.config.poll_seconds)
@@ -60,18 +62,36 @@ def run_plan_check(config, path):
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description="Gento Skye 固定底盘空载双臂编排")
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if argv and argv[0] == "gripper":
+        # Keep standalone diagnostics independent of the robot controller connection.
+        from .gripper_cli import main as gripper_main
+        return gripper_main(argv[1:])
+    parser = argparse.ArgumentParser(description="Gento Skye 固定底盘双臂与夹爪编排")
+    parser.epilog = "独立夹爪检测: python3 -m skye_task gripper --help"
     parser.add_argument("command", choices=("check", "plan-check", "run"),
                         help="check 离线配置检查；plan-check 只读规划；run 连接并执行")
     parser.add_argument("--config", type=Path, help="JSON 配置覆盖文件")
     parser.add_argument("--result", type=Path, help="结果 JSON 路径")
+    parser.add_argument("--gripper-config", type=Path,
+                        default=Path(__file__).resolve().parents[1] / "config/gripper-can.json",
+                        help="整体任务夹爪配置；默认使用项目中的 config/gripper-can.json")
     args = parser.parse_args(argv)
     try:
         config = load_config(args.config)
+        gripper_config = None
+        if config.gripper_enabled and args.command != "plan-check":
+            from .dm_gripper import load_gripper_config
+            gripper_config = load_gripper_config(args.gripper_config)
+            for action in ("open", "close"):
+                gripper_config.action_positions(action, "both")
     except (ValueError, OSError) as error:
         parser.error(str(error))
     if args.command == "check":
-        print(json.dumps(asdict(config), ensure_ascii=False, indent=2, allow_nan=False))
+        values = asdict(config)
+        if gripper_config is not None:
+            values["gripper"] = asdict(gripper_config)
+        print(json.dumps(values, ensure_ascii=False, indent=2, allow_nan=False))
         return 0
     if args.result is None:
         args.result = Path("runs/plan-check.json" if args.command == "plan-check" else "runs/latest.json")
@@ -84,12 +104,17 @@ def main(argv=None):
         return run_plan_check(config, args.result)
     sdk = None
     sequence = None
+    gripper = None
     result = Result()
     old_handlers = {}
     exit_code = 1
     try:
         sdk = GentoSDK(config)
-        sequence = Sequence(sdk, config, on_event=lambda name, detail: logging.info("%s %s", name, detail))
+        if gripper_config is not None:
+            from .task_gripper import TaskGripper
+            gripper = TaskGripper(sdk, gripper_config)
+        sequence = Sequence(sdk, config, gripper=gripper,
+                            on_event=lambda name, detail: logging.info("%s %s", name, detail))
         result = sequence.result
         for sig in (signal.SIGINT, signal.SIGTERM):
             old_handlers[sig] = signal.signal(sig, lambda *_: sequence.request_stop())
@@ -107,7 +132,25 @@ def main(argv=None):
             result.error = str(error)
             result.finished_at = datetime.now(timezone.utc).isoformat()
     finally:
-        if sdk is not None:
+        sdk_can_close = True
+        if gripper is not None:
+            try:
+                result.metadata["gripper_final"] = gripper.snapshot()
+            except Exception as error:
+                result.metadata["gripper_snapshot_error"] = str(error)
+            try:
+                gripper.close()
+                result.metadata["gripper_cleanup"] = "periodic_commands_stopped_no_disable_sent"
+            except Exception as error:
+                logging.error("夹爪资源释放失败: %s", error)
+                result.metadata["gripper_cleanup_error"] = str(error)
+                result.error = result.error or str(error)
+                result.status = "failed"
+                exit_code = 1
+                if gripper.worker_running:
+                    sdk_can_close = False
+                    result.metadata["sdk_cleanup_skipped"] = "gripper_worker_still_running"
+        if sdk is not None and sdk_can_close:
             try:
                 sdk.close()
             except Exception as error:
@@ -115,6 +158,8 @@ def main(argv=None):
                 exit_code = 1
                 if sequence is not None:
                     sequence.result.metadata["cleanup_error"] = str(error)
+                result.status = "failed"
+                result.error = result.error or str(error)
         for sig, handler in old_handlers.items():
             signal.signal(sig, handler)
         write_report(args.result, result.to_dict())

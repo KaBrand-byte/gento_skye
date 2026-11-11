@@ -1,4 +1,4 @@
-"""Sequential unloaded motion, including feedback-based completion and stopping."""
+"""Fixed-base arm and gripper task with feedback-based completion and stopping."""
 
 from dataclasses import asdict, dataclass, field
 from copy import deepcopy
@@ -9,6 +9,7 @@ import threading
 import time
 
 from .geometry import local_displacement, pose_error, translated
+from .interfaces import GripperAction, GripperTarget
 from .sdk import MIN_TRAJECTORY_POINTS, MotionError, Trajectory
 
 
@@ -54,13 +55,16 @@ class Result:
 
 
 class Sequence:
-    def __init__(self, sdk, config, *, clock=time.monotonic, wait=None, on_event=None):
+    def __init__(self, sdk, config, *, gripper=None, clock=time.monotonic, wait=None, on_event=None):
         self.sdk, self.config = sdk, config
+        self.gripper = gripper if config.gripper_enabled else None
         self.clock = clock
         self.stop_requested = threading.Event()
         self.wait = wait or self.stop_requested.wait
         self.on_event = on_event or (lambda name, details: None)
         self.result = Result()
+        if config.gripper_enabled:
+            self.result.mode = "fixed_base_with_grippers"
         self.fixed = None
         self.lift_motion = None
         self.lift_command_active = False
@@ -87,6 +91,10 @@ class Sequence:
             raise MotionError("流程不可重复初始化")
         self.begin = self.clock()
         self._checkpoint()
+        if self.config.gripper_enabled and self.gripper is None:
+            raise MotionError("夹爪已启用但未提供实际驱动，拒绝执行双臂任务")
+        if self.gripper is not None:
+            self.gripper.reserve()
         self.result.metadata = self.sdk.connect()
         feedback = self.sdk.read()
         self._guard(feedback, require_position=False)
@@ -99,13 +107,20 @@ class Sequence:
         self.result.metadata["initial_fixed_feedback"] = deepcopy(self.fixed)
         self.result.metadata["lift_targets_mm"] = {"ready": self.config.ready_lift,
                                                    "receive": self.config.receive_lift}
+        if self.gripper is not None:
+            self.gripper.connect()
+            self.result.metadata["gripper_config"] = asdict(self.gripper.config)
         self._record("initialized", status="completed")
         self._move_joint("ready", self.config.ready)
         self._move_lift("ready_lift", self.config.ready_lift[0])
-        self._record("open_before_receive", status="skipped", reason="夹爪未接入，空载验证")
+        if self.gripper is not None:
+            self._gripper_action("open_before_receive", GripperAction.OPEN)
+        else:
+            self._record("open_before_receive", status="skipped", reason="配置关闭夹爪，空载验证")
         self._move_joint("receive", self.config.receive)
         self._move_lift("receive_lift", self.config.receive_lift[0])
-        self._record("handover_and_close", status="skipped", reason="空载验证，无交接等待")
+        if self.gripper is None:
+            self._record("handover_and_close", status="skipped", reason="空载验证，无交接等待")
         self.prepared = True
         self._record("awaiting_task_start", status="waiting")
 
@@ -122,15 +137,25 @@ class Sequence:
             raise MotionError("触发任务时双臂已偏离接盘位")
         if any(feedback.trajectory_states):
             raise MotionError("触发任务时双臂轨迹尚未空闲")
+        if self.gripper is not None:
+            self.result.handover = "started"
+            self._gripper_action("handover_and_close", GripperAction.CLOSE)
+            self._wait_checked("handover_wait", self.config.handover_wait_seconds)
+            self.result.handover = "completed"
         self._record("navigation", status="skipped", reason="固定底盘，未调用导航")
         self._move_linear("forward", [[self.config.forward_mm, 0, 0]] * 2, self.config.forward)
         self._move_linear("down", [[0, 0, -self.config.down_mm]] * 2, self.config.down)
-        self._record("release", status="skipped", reason="夹爪未接入，无开合指令或等待")
+        if self.gripper is not None:
+            self._gripper_action("release", GripperAction.OPEN)
+        else:
+            self._record("release", status="skipped", reason="配置关闭夹爪，无开合指令或等待")
         self._move_linear("exit", [[0, self.config.left_exit_mm, 0],
                                    [0, -self.config.right_exit_mm, 0]], self.config.exit)
         self._move_joint("return_ready", self.config.ready)
         self._move_lift("return_ready_lift", self.config.ready_lift[0])
         self.result.motion_completed = True
+        if self.gripper is not None:
+            self.result.gripper_actions = "completed"
         self.result.status = "completed"
         self.result.finished_at = datetime.now(timezone.utc).isoformat()
         self._record("finished", status="completed", grasped=None, placed=None)
@@ -142,6 +167,15 @@ class Sequence:
         self.result.status = "stopped" if isinstance(error, (Stopped, KeyboardInterrupt)) else "failed"
         self.result.error = str(error) or type(error).__name__
         self.result.finished_at = datetime.now(timezone.utc).isoformat()
+        if self.gripper is not None:
+            try:
+                self.gripper.freeze()
+            except Exception as stop_error:
+                self.result.metadata["gripper_freeze_error"] = str(stop_error)
+            if self.result.gripper_actions == "started":
+                self.result.gripper_actions = "incomplete"
+            if self.result.handover == "started":
+                self.result.handover = "incomplete"
         if self.sdk.connected:
             stop_errors = []
             try:
@@ -162,7 +196,50 @@ class Sequence:
         feedback = self.sdk.read()
         self._checkpoint()
         self._guard(feedback)
+        if self.gripper is not None:
+            self.gripper.check_health()
         return feedback
+
+    def _stationary_checkpoint(self, joints):
+        feedback = self.checked_feedback()
+        if (any(feedback.trajectory_states)
+                or any(not self._near(actual, target) for actual, target in zip(feedback.joints, joints))
+                or any(abs(v) > self.config.joint_velocity_tolerance_deg_s
+                       for arm in feedback.rt["arms"] for v in arm["fb"]["fb_vel"])):
+            raise MotionError("夹爪动作或交接等待期间双臂未保持静止")
+
+    def _wait_checked(self, name, seconds):
+        joints = self.checked_feedback().joints
+        self._record(name, status="started", wait_seconds=seconds)
+        until = self.clock() + seconds
+        while True:
+            self._stationary_checkpoint(joints)
+            remaining = until - self.clock()
+            if remaining <= 0:
+                break
+            self.wait(min(self.config.poll_seconds, remaining))
+        self._record(name, status="completed", wait_seconds=seconds)
+
+    def _gripper_action(self, name, action):
+        joints = self.checked_feedback().joints
+        self.result.gripper_actions = "started"
+        targets = self.gripper.config.action_positions(action.value, "both")
+        self._record(name, status="started", action=action.value, targets_rad=targets)
+        started = self.clock()
+        try:
+            sample = self.gripper.control(GripperTarget.BOTH, action,
+                                          lambda: self._stationary_checkpoint(joints))
+        except (Exception, KeyboardInterrupt) as error:
+            try:
+                snapshot = self.gripper.snapshot()
+            except Exception as snapshot_error:
+                snapshot = {"snapshot_error": str(snapshot_error)}
+            self._record(name, status="failed", action=action.value, targets_rad=targets,
+                         error=str(error), feedback=snapshot)
+            raise
+        self._record(name, status="completed", action=action.value, targets_rad=targets,
+                     feedback=sample, execution_seconds=self.clock() - started)
+        self._wait_checked(name + "_wait", self.config.gripper_wait_seconds)
 
     def _guard(self, feedback, *, require_position=True):
         for arm in feedback.rt["arms"]:

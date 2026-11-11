@@ -34,8 +34,8 @@ class Config:
         [-90, -64, 67, -89, 24, -8, -17],
     ])
     receive: list = field(default_factory=lambda: [
-        [29.327, -48.5, -1.148, -93.315, 21.408, 17.679, -70.715],
-        [-29.327, -48.5, 1.148, -93.315, -21.408, 17.679, 70.715],
+        [85, -70, -60, -90, 15, 0, 10],
+        [-85, -70, 60, -90, -15, 0, -10],
     ])
     # Only these explicitly listed axes are effective; remaining SDK slots are padding.
     body: list = field(default_factory=lambda: [0, 0])
@@ -65,7 +65,7 @@ class Config:
     execution_timeout_seconds: float = 120.0
     feedback_timeout_seconds: float = 1.0
     poll_seconds: float = 0.02
-    # Reserved for future gripper integration; not used in the unloaded sequence.
+    gripper_enabled: bool = True
     gripper_wait_seconds: float = 1.0
     handover_wait_seconds: float = 1.0
 
@@ -81,8 +81,10 @@ class Config:
                 _vector(point, 7, name)
         for name, size in (("body", 2), ("head", 2), ("ready_lift", 1), ("receive_lift", 1)):
             _vector(getattr(self, name), size, name)
+        if type(self.gripper_enabled) is not bool:
+            raise ValueError("gripper_enabled 必须为布尔值")
         for name, value in asdict(self).items():
-            if isinstance(value, (float, int)):
+            if name != "gripper_enabled" and isinstance(value, (float, int)):
                 _positive(value, name)
         for name in ("controller_trajectory_hz", "mode_timeout_ms"):
             if type(getattr(self, name)) is not int:

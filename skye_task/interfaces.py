@@ -1,4 +1,4 @@
-"""Future integrations. Unimplemented operations never report success."""
+"""Task interfaces. Motion completion and grasp/placement detection are separate."""
 
 from enum import Enum
 from typing import Optional, Protocol
@@ -16,8 +16,8 @@ class GripperAction(str, Enum):
 
 
 class Gripper:
-    def control(self, target: GripperTarget, action: GripperAction) -> None:
-        raise NotImplementedError("夹爪控制尚未接入；空载流程必须显式跳过")
+    def control(self, target: GripperTarget, action: GripperAction, checkpoint=lambda: None):
+        raise NotImplementedError("请选择实际夹爪驱动，例如 TaskGripper")
 
     def is_grasped(self) -> Optional[bool]:
         return None

@@ -165,7 +165,7 @@ class Device:
 class SequenceTests(unittest.TestCase):
     def setUp(self):
         self.config = replace(Config(), stable_seconds=.04, start_timeout_seconds=.15,
-                              execution_timeout_seconds=.5, poll_seconds=.02)
+                              execution_timeout_seconds=.5, poll_seconds=.02, gripper_enabled=False)
         self.clock = Clock()
         self.device = Device(self.config)
         self.sequence = Sequence(self.device, self.config, clock=self.clock, wait=self.clock.wait)
@@ -506,6 +506,7 @@ class GeometryAndConfigTests(unittest.TestCase):
             {"unknown": 1}, {"forward": {"frequency_hz": 50.5}},
             {"left_exit_mm": True}, {"forward_mm": "150"},
             {"ready_lift": [500, 0]}, {"receive_lift": [float("nan")]},
+            {"gripper_enabled": 1}, {"gripper_enabled": "true"},
         ]
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / "config.json"
