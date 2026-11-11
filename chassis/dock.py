@@ -237,6 +237,11 @@ ST_FILE = os.path.join(HERE, 'stations.json')
 LOG_FILE = os.path.join(HERE, 'dock_log.csv')
 LAT_GAIN = 1.0          # small sideways moves are erratic (under- and overshoot): no gain
 CLOSEST_SLACK = 0.01   # margin kept when stopping 'as close as possible'
+# The final approach is lidar-relative (edge distance, angle, end point), so the staging point only needs to be
+# roughly reached: within this distance and standing still counts as arrived (the vendor server keeps its task
+# open beyond ~5 cm, e.g. when its localisation corrected itself on the way).
+STAGING_TOL = 0.35
+LOC_MIN_MATCH = 0.60   # scan-to-map match below this before navigating = localisation clearly wrong -> stop
 LAT_TOL = 0.010         # the chassis cannot place sideways moves below ~1 cm reliably
 LAT_MAX = 0.08
 LAT_PLAN_MAX = 0.60   # planned sideways shift from staging to the dock line
@@ -264,11 +269,18 @@ def align_heading(m, dry=False):
         e = m['err'] + YAW_OFF[0]                 # yaw_offset > 0: stop turned that much to the left of square
         if abs(e) <= ANG_TOL:
             break
-        if abs(e) > math.radians(12):
+        if abs(e) > math.radians(25):          # > 12 deg is checked over a full circle by safe_rotate
             raise SystemExit('ABORT: heading error too large (%.1f deg)' % math.degrees(e))
         log('rotate %.2f deg' % math.degrees(e))
-        if dry:
-            need_clear(RM.rotation_hits(cloud(), CFG, 'carry'), 'rotation (dry run)')
+        if dry:                                 # same decision as safe_rotate, without moving
+            p = cloud()
+            if abs(e) <= math.radians(12) and not RM.turn_hits(p, CFG, e):
+                log('  (dry) turn of %.2f deg is clear' % math.degrees(e))
+            else:
+                mv = RM.leave_move(p, CFG, 0.30)
+                if mv is None:
+                    need_clear(RM.rotation_hits(p, CFG), 'rotation (dry run)')
+                log('  (dry) would first move x=%.2f y=%.2f, then turn %.2f deg' % (mv[0], mv[1], math.degrees(e)))
             break
         safe_rotate(e + math.copysign(ROT_SHORT, e)); m = measure(); log('  re-measure', pub(m))
     return m
@@ -335,6 +347,21 @@ def approach(gap, dry, align_only=False):
     json.dump(dict(fwd=fwd, gap=gap, t=time.time()), open('/tmp/claude_dock_last.json', 'w'))
 
 
+def check_localisation():
+    """Scan-to-map match of the current pose (locmatch.py).  Navigating with a clearly wrong pose drives to the
+    wrong place, so stop early with a clear message."""
+    try:
+        out = subprocess.run(['python3', os.path.join(HERE, 'locmatch.py'), 'check'], capture_output=True,
+                             text=True, timeout=60).stdout.strip().splitlines()
+        res = json.loads(out[-1])
+    except Exception as e:
+        log('localisation check skipped (%s)' % e); return
+    log('localisation: pose %s, scan-to-map match %.2f' % (res.get('reported'), res.get('match', 0)))
+    if res.get('match', 0) < LOC_MIN_MATCH:
+        raise SystemExit('ABORT: localisation looks wrong (match %.2f < %.2f) - relocalise first '
+                         '(locmatch.py global --apply, or relocate on the web page)' % (res.get('match', 0), LOC_MIN_MATCH))
+
+
 def nav_task(st):
     """Submit the vendor navigation task to the station's staging point (in-process, NAV_SPEED)."""
     _PARK_OK[0] = False                         # navigation ends in parking mode
@@ -392,7 +419,7 @@ def cancel_all_tasks():
         f = c.call_async(CancelAllTask.Request()); rclpy.spin_until_future_complete(n, f, timeout_sec=3)
 
 
-def wait_task(tmo=150, near=None, tol=0.20):
+def wait_task(tmo=150, near=None, tol=STAGING_TOL):
     """Wait until the navigation task is gone.  The vendor server keeps a station task open when the robot
     stops a few cm off the node ("Current Pos Without Node"); so if we are within `tol` of the staging point
     and have not moved for 1.5 s, treat it as arrived and cancel the dangling task ourselves."""
@@ -455,6 +482,7 @@ elif cmd in ('dock', 'redock'):
         # tray over the table) reverse straight out until turning is clear; otherwise stop.
         if not S[0].is_hard_auto:
             raise SystemExit('ABORT: hard switch is on MANUAL - switch it to AUTO first')
+        check_localisation()
         if RM.rotation_hits(cloud(), CFG):
             if '--leave' not in sys.argv:
                 need_clear(RM.rotation_hits(cloud(), CFG), 'turning at the start position (navigation turns in place '
@@ -473,7 +501,7 @@ elif cmd in ('dock', 'redock'):
         # the task list also empties when the task is cancelled or fails: check we really are at the staging point
         if sxy:
             x, y, _ = map_pose(); dd = math.hypot(x - sxy[0], y - sxy[1])
-            if dd > 0.25:
+            if dd > STAGING_TOL + 0.05:
                 raise SystemExit('ABORT: navigation ended %.2f m from the staging point (task cancelled or failed?)' % dd)
         if 'staging_pose' in st:   # pose tasks keep the start heading: turn to the face here (staging is clear all round)
             turn_to(math.radians(st['staging_pose'][2]))
