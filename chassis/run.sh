@@ -23,6 +23,8 @@ num() { [[ "$1" =~ ^0?\.[0-9]+$|^[0-9]+(\.[0-9]+)?$ ]] && echo "$1" || echo "$2"
 start() {                                   # start JOB CMD...: detached, status kept in job_status.json
   if running; then echo "BUSY: job $(cat $PID) still running - use stop first"; exit 1; fi
   local job="$1"; shift
+  # mark the NEW job as running before returning, so no reader can still see the previous job's result
+  printf '{"state": "running", "job": "%s", "t": %s}\n' "$job" "$(date +%s)" > "$JS"
   setsid nohup python3 "$DIR/job_wrap.py" "$job" -- "$@" > /dev/null 2>&1 < /dev/null &
   echo $! > "$PID"; echo "started job $job ($!): $*  (follow with: log)"
 }
@@ -35,7 +37,7 @@ case "$1" in
             start "$2" timeout 500 python3 dock.py dock "$2" $(num "$3" '') --leave $extra ;;
   demo-dry) timeout 120 python3 dock.py dock D $(num "$2" 0.25) --leave --here --closest --dry ;;
   stop)     if running; then pkill -TERM -s "$(ps -o sid= -p $(cat $PID) | tr -d ' ')" 2>/dev/null; fi
-            rm -f "$PID"; printf '{"state": "failed", "job": "stopped", "error": "stopped by user"}\n' > "$JS"
+            rm -f "$PID"; printf '{"state": "failed", "job": "stopped", "error": "stopped by user", "t": %s}\n' "$(date +%s)" > "$JS"
             timeout 30 python3 dock.py stop ;;
   status)   timeout 15 python3 nav.py state
             curl -s -m 5 -X POST -d '{}' http://127.0.0.1:8080/api/Task/GetAllTask | python3 -c "import sys,json; c=json.load(sys.stdin)['Content']; print('tasks:', [t['id'] for t in c] or 'none')"

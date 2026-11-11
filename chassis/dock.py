@@ -216,6 +216,7 @@ def rel(x=0.0, yaw=0.0, rear_check=False, y=0.0):
 ST_FILE = os.path.join(HERE, 'stations.json')
 LOG_FILE = os.path.join(HERE, 'dock_log.csv')
 LAT_GAIN = 1.0          # small sideways moves are erratic (under- and overshoot): no gain
+CLOSEST_SLACK = 0.01   # margin kept when stopping 'as close as possible'
 LAT_TOL = 0.010         # the chassis cannot place sideways moves below ~1 cm reliably
 LAT_MAX = 0.08
 LAT_PLAN_MAX = 0.60   # planned sideways shift from staging to the dock line
@@ -484,6 +485,7 @@ elif cmd in ('dock', 'redock'):
             if ok is None:
                 raise SystemExit('ABORT: no position on this line where the approach and the place motion are '
                                  'clear: %s' % json.dumps(why))
+            ok = max(0.0, ok - CLOSEST_SLACK)
             log('requested gap %.3f is blocked by %s -> stopping early, forward %.3f m (gap %.3f)'
                 % (gap, json.dumps(why), ok, m['dist'] - FRONT - ok))
             fwd = ok
@@ -510,6 +512,7 @@ elif cmd in ('dock', 'redock'):
         if ok is None:
             raise SystemExit('ABORT: already touching something ahead after the sideways move')
         if ok < f0 - 0.005:
+            ok = max(0.0, ok - CLOSEST_SLACK)      # never plan exactly at the limit: the sideways move shifts things
             log('requested gap %.3f is blocked -> will stop at gap %.3f (closest clear)' % (gap, m['dist'] - FRONT - ok))
             gap = m['dist'] - FRONT - ok
     plan_approach(m, st, gap)                                  # stops here if the taught approach is blocked
@@ -519,6 +522,16 @@ elif cmd in ('dock', 'redock'):
     log('forward %.3f m (target gap %.3f)' % (fwd, gap))
     if fwd < 0 or fwd > MAX_FWD:
         raise SystemExit('ABORT: forward %.3f out of range' % fwd)
+    if '--closest' in sys.argv:
+        # re-evaluate with the fresh cloud after the sideways/heading corrections; back off if needed
+        ok = RM.max_forward(RM.remove_self(cloud(), CFG), CFG, max(fwd, 0.0))
+        if ok is None:
+            raise SystemExit('ABORT: already touching something ahead after aligning')
+        if ok < fwd - 0.002:
+            ok = max(0.0, ok - CLOSEST_SLACK)
+            log('after aligning the requested gap is blocked -> forward %.3f m instead of %.3f (gap %.3f)'
+                % (ok, fwd, m['dist'] - FRONT - ok))
+            fwd = ok; gap = m['dist'] - FRONT - ok
     plan_approach(m, st, gap)                                  # re-check right before driving in
     if not dry:
         rel(fwd + FWD_SHORT, 0.0)

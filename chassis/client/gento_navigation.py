@@ -39,6 +39,7 @@ class GentoNavigation:
         self.status_timeout = status_timeout
         self.run_sh = run_sh
         self.active = None
+        self._seen_active = False       # True once the chassis reported OUR job (older results are ignored)
         self._status = None
         self._status_at = 0.0
         if transport == "ros":
@@ -150,15 +151,27 @@ class GentoNavigation:
             if "started job" not in out:
                 raise NavigationError(f"底盘拒绝导航任务: {out.strip()}")
         self.active = destination
+        self._seen_active = False
+
+    def _current(self):
+        """Status of the job we started.  Until the chassis has reported our job once, any other job's result
+        (e.g. a stale "stopped" left by the previous run) is ignored and reads as still starting."""
+        status = self.job_status()
+        if status.get("job") == self.active:
+            self._seen_active = True
+            return status
+        if self._seen_active and status.get("job") == "stopped":
+            return status                       # our job was stopped (run.sh stop) after it had started
+        return {"state": "starting", "job": self.active}
 
     def is_arrived_and_stopped(self):
         """True only after the docking job finished successfully (docked and standing still)."""
-        status = self.job_status()
+        status = self._current()
         return status.get("state") == "done" and status.get("job") == self.active
 
     def raise_if_failed(self):
-        status = self.job_status()
-        if status.get("state") == "failed" and status.get("job") in (self.active, "stopped"):
+        status = self._current()
+        if status.get("state") == "failed":
             raise NavigationError(status.get("error") or "导航失败")
 
     def stop(self):

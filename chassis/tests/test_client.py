@@ -56,6 +56,22 @@ class SshTransportTests(unittest.TestCase):
             with self.assertRaisesRegex(NavigationError, "straight approach blocked"):
                 nav.raise_if_failed()
 
+    def test_stale_stop_from_the_previous_run_is_ignored_but_a_real_stop_is_reported(self):
+        stale = json.dumps({"state": "failed", "job": "stopped", "error": "stopped by user"})
+        _, patch = self.patch_run([
+            "started job T (7)\n",
+            stale,                                                     # left by the previous run
+            json.dumps({"state": "running", "job": "T"}),
+            stale,                                                     # stopped while OUR job ran
+        ])
+        with patch:
+            nav = GentoNavigation(transport="ssh")
+            nav.start("T")
+            nav.raise_if_failed()                                      # stale: must not raise
+            self.assertFalse(nav.is_arrived_and_stopped())
+            with self.assertRaisesRegex(NavigationError, "stopped by user"):
+                nav.raise_if_failed()
+
     def test_stop_and_tune_commands(self):
         calls, patch = self.patch_run(["stopped\n", "D {\"gap\": 0.3}\n"])
         with patch:
