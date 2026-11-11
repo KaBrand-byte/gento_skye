@@ -11,6 +11,11 @@
 #   tune NAME KEY VALUE   fine-tune: gap (m) | lat_offset (m, + = further left) | yaw_offset (deg, + = left)
 #   teach NAME            record the current lateral position as station NAME (turns a little, asks y/n)
 #   job        job status JSON (what the skye_task adapter reads)
+#   task [args]    START THE FULL TASK on the Orin (arms + navigation, in tmux)       (MOVES, asks y/n)
+#                  args e.g. --selfscan | --start '' | --place-gap 0.30
+#   task-attach    re-attach to the running task (after a Wi-Fi drop); Ctrl-b d detaches, task keeps running
+#   task-stop      Ctrl-C to the task (stops arms + chassis) and software-stop the chassis
+#   task-check     no motion: task config + SDK version on the Orin
 #   stop       software stop: kill job, cancel moves + tasks, soft manual
 #   log        follow the job log (Ctrl+C to leave; the job keeps running)
 #   web        open the chassis web page (starts the tunnel if needed)
@@ -40,6 +45,11 @@ switch ($Cmd) {
     'tune'     { ssh chassis "$remote tune $Arg $($Rest -join ' ')" }
     'teach'    { Confirm-Motion "teach station $Arg at the current lateral position (turns a little)"; ssh chassis "$remote teach $Arg" }
     'job'      { ssh chassis "$remote job-status" }
+    'task'        { Confirm-Motion "FULL TASK on the Orin: arms to carry pose, drive to T, Enter, drive to D, place";
+                    ssh -t orin "bash ~/gento_skye/chassis/client/orin_task.sh start $Arg $($Rest -join ' ')" }
+    'task-attach' { ssh -t orin "bash ~/gento_skye/chassis/client/orin_task.sh attach" }
+    'task-stop'   { ssh orin "bash ~/gento_skye/chassis/client/orin_task.sh stop" }
+    'task-check'  { ssh orin "bash ~/gento_skye/chassis/client/orin_task.sh check" }
     'stop'     { ssh chassis "$remote stop" }
     'log'      { ssh -t chassis "$remote log" }
     'web'      {
@@ -48,5 +58,5 @@ switch ($Cmd) {
         if (-not $ok) { Start-Process ssh -ArgumentList '-o ExitOnForwardFailure=yes -o ServerAliveInterval=10 chassis-web' -WindowStyle Minimized; Start-Sleep 4 }
         Start-Process 'chrome.exe' 'http://localhost:8080'
     }
-    default    { Get-Content $PSCommandPath -TotalCount 18 | Select-Object -Skip 1 }
+    default    { Get-Content $PSCommandPath -TotalCount 24 | Select-Object -Skip 1 }
 }

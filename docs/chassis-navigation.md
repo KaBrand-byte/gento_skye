@@ -110,6 +110,42 @@ python3 -c "import sys; sys.path.insert(0, 'chassis/client'); from gento_navigat
 
 参考实现及 11 项离线测试保存在本地分支 `chassis-navigation-sequence-proposal`（未推送），需要时可以单独提交 PR 供评审。
 
+## 4.2 全部在机器人上运行（Orin）
+
+2026-11-11 已在 Orin 上部署并验证（只读）：
+- **运行环境**：Orin（aarch64，Python 3.10）上装有厂家 `gento-sdk` 4.7.1（`/usr/local/lib/libGentoSDK.so`）。SDK 包 `tianji-robot-SDK/dist_aarch64/` 自带 ARM64 版 `libGentoSDKPY.so`。
+- **SDK 部署**：把 `PYTHON_SDK/GentoRobot.py` 和 ARM64 版 `libGentoSDKPY.so` 放到 `~/robot_sdk/tianji-robot-SDK/PYTHON_SDK/`，并设置 `GENTO_SDK_ROOT=~/robot_sdk/tianji-robot-SDK`（skye_task 中环境变量优先于配置文件）。
+- **代码部署**：`~/gento_skye` 放本仓库 `chassis-navigation` 分支的代码，不含 `项目文件`。
+- **验证结果**：
+  - `skye_task` 原有 60 项测试、`chassis/tests` 都在 Orin 上通过；
+  - `plan-check` 连接控制器成功：通信延迟 2 ms，控制器 `0x00040701`，DOF 为双臂各 7、头 2、腰 2、升降 1；它报失败只是因为升降在 500 mm，不在接盘高度；
+  - Orin 通过 ROS 2 桥接调用底盘的 `job_status`、`pose`、`check` 都正常。
+
+一键运行（任务在 Orin 的 tmux 会话里运行，Wi-Fi 断了也不会中断）：
+
+```bash
+bash ~/gento_skye/chassis/client/orin_task.sh check            # 只读自检：配置 + SDK 版本
+bash ~/gento_skye/chassis/client/orin_task.sh start --selfscan # 完整任务（会动）
+bash ~/gento_skye/chassis/client/orin_task.sh attach           # 断线后重新接回
+bash ~/gento_skye/chassis/client/orin_task.sh stop             # 软件停止：手臂 + 底盘
+```
+
+在 Windows 电脑上对应的命令是 `tools/gento.ps1 task | task-attach | task-stop | task-check`。
+
+完整任务的顺序：
+1. 双臂到接盘（运输）姿态，升降 450 mm；
+2. （可选）`selfscan` 实测双臂和托盘占位；
+3. 导航到 T；
+4. 按 Enter；
+5. 导航到 D；
+6. 执行前伸、下降、两侧退出、回准备位。
+
+结果写在 `~/gento_skye/runs/with-navigation.json`。
+
+注意：
+- 运行前确认 Apex 遥操作没有在控制手臂；目前只有 `apex-backend` 在运行。
+- 充电位附近（紧贴虚拟墙、地图清理过）的扫描匹配不可靠，开机自检可能判定“定位不可靠”。出发前先把车推进工作区，再运行 `run.sh check` 或开机自检，确认定位正确后再开始。
+
 ## 5. 运行与调试命令
 
 在底盘上（`~/gento_dock/run.sh …`），或在 Windows 电脑上用 [`tools/gento.ps1`](../tools/gento.ps1)：

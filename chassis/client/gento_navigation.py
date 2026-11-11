@@ -59,7 +59,8 @@ class GentoNavigation:
             node = rclpy.create_node("skye_task_navigation_%s" % uuid.uuid4().hex[:6], context=self._context)
             self._executor = SingleThreadedExecutor(context=self._context)
             self._executor.add_node(node)
-            threading.Thread(target=self._executor.spin, daemon=True).start()
+            self._thread = threading.Thread(target=self._spin, daemon=True)
+            self._thread.start()
         self._node = node
         latched = QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE,
                              durability=DurabilityPolicy.TRANSIENT_LOCAL, history=HistoryPolicy.KEEP_LAST)
@@ -89,11 +90,28 @@ class GentoNavigation:
             time.sleep(0.05)
         raise NavigationError(f"底盘导航桥未应答: {command}")
 
+    def _spin(self):
+        context = self._context
+        try:
+            while context.ok():
+                self._executor.spin_once(timeout_sec=0.1)
+        except Exception:
+            pass                                     # context shut down while waiting
+
     def close(self):
+        """Stop the private ROS executor cleanly (only when this object created it)."""
         if self.transport == "ros" and self._context is not None:
-            self._executor.shutdown()
+            context, self._context = self._context, None
+            self._stop_context(context)
+
+    def _stop_context(self, context):
+        context.try_shutdown()                       # makes _spin return
+        self._thread.join(timeout=2.0)
+        try:
+            self._executor.shutdown(timeout_sec=1.0)
             self._node.destroy_node()
-            self._context.try_shutdown()
+        except Exception:
+            pass
 
     # ---------------------------------------------------------------- SSH transport
     def _ssh(self, *arguments, timeout=20.0):
