@@ -120,7 +120,7 @@ Orin（nvidia）  ~/gento_skye                       底盘 S100（sunrise）  ~
 | 位置 | 内容 | 版本 |
 | --- | --- | --- |
 | GitHub `chassis-navigation` | 全部代码与文档 | 最新提交 |
-| 底盘 `~/gento_dock` | `dock.py`、`run.sh`、`robot_model.py`、桥接等 | `dock.py` 为 6b4bb4d（禁止组合移动）；**e5806ed（离开 D 先回安全点 + 出发前自己转向）尚未部署**，等 10 次测试结束后只需替换 `dock.py` |
+| 底盘 `~/gento_dock` | `dock.py`、`run.sh`、`robot_model.py`、桥接等 | `dock.py` 为 e5806ed（禁止组合移动；离开 D 先回安全点 + 出发前自己转向，2026-11-12 第 4 次测试失败后部署） |
 | 底盘数据 | `stations.json`（T、D）、`refs/T.npy`、`refs/D.npy`、`robot_model.json`（含托盘的实测形状 + 托盘包络） | 各有 `.bak-时间` 备份 |
 | Orin `~/gento_skye` | 合并了 `skye_task` 最新 master（2f245b7）与本分支 | 客户端 07fe83a；原目录备份 `~/gento_skye.bak-11121037` |
 | Orin `~/gento_tmp` | 临时脚本（不在仓库）：`arms_to_ready.py`、`place_at_d.py`、`place_test.json`（下降/上移 120 的测试配置）、只读规划检查 `reach2.py`、`plan_back.py`、`preflight_ro.py`、读状态 `rd.py`、诊断 `diag.py` | — |
@@ -134,8 +134,8 @@ Orin（nvidia）  ~/gento_skye                       底盘 S100（sunrise）  ~
 
 ## 7. 待办与需要决定的事
 
-1. **10 次连续测试**：看 `runs/cycles.log`，失败的那一次看对应的 `cycle-NN.json` 和底盘 `~/gento_dock/run.log`。
-2. **部署 e5806ed**（测试结束后）：离开 D 时先回 D 的安全点，再由本系统检查后转向目的地，避免厂家导航在桌腿旁原地转身时爬行（回 T 的导航用时 38–54 s 波动的主要原因）。
+1. **10 次连续测试**：第一轮 3/4 成功；第 4 次失败原因为 `staging not reached in time`（从 D 回 T 时厂家导航在桌腿旁原地转身爬行，超过 150 s）。已部署 e5806ed 后重新测试。看 `runs/cycles.log`，失败的那一次看对应的 `cycle-NN.json` 和底盘 `~/gento_dock/run.log`。
+2. **e5806ed 已部署，待验证**：离开 D 时先回 D 的安全点，再由本系统检查后转向目的地，避免厂家导航在桌腿旁原地转身时爬行（回 T 的导航用时 38–54 s 波动、第 4 次失败的原因）。
 3. **请 `skye_task` 维护者处理**：
    - `prepare()` 从接盘位一侧出发时应先经过渡位，避免直接去准备位导致双臂相撞；
    - 下降 150 mm 在当前接盘位 + 前伸 100 时超出可达范围（关节 4 伸直）；本系统已用升降补足，确认是否接受，或调整接盘位 / 前伸距离。
