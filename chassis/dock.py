@@ -26,7 +26,7 @@ CFG = RM.load()
 FRONT = 0.338          # chassis centre -> front edge
 GRIP = 0.33            # gripper tip beyond chassis front (worst case)
 MAX_FWD = 1.20          # longest straight approach (checked against the live lidar the whole way)
-ANG_TOL = math.radians(0.4)
+ANG_TOL = math.radians(0.5)       # the chassis repeats small turns only to ~+-0.8 deg
 YAW_OFF = [0.0]                  # station fine-tune (rad), set from stations.json yaw_offset
 ROT_SHORT = math.radians(0.77)   # measured rotation shortfall of MoveRelative
 FWD_SHORT = 0.011                # measured: straight moves stop ~11 mm short
@@ -297,14 +297,34 @@ def align_heading(m, dry=False):
                     need_clear(RM.rotation_hits(p, CFG), 'rotation (dry run)')
                 log('  (dry) would first move x=%.2f y=%.2f, then turn %.2f deg' % (mv[0], mv[1], math.degrees(e)))
             break
-        safe_rotate(e + math.copysign(ROT_SHORT, e)); m = measure(); log('  re-measure', pub(m))
+        # small turns: no shortfall compensation (measured: left turns are exact, right ones scatter +-0.8 deg)
+        safe_rotate(e if abs(e) < math.radians(5) else e + math.copysign(ROT_SHORT, e))
+        m = measure() or measure(near=True); log('  re-measure', pub(m))
     return m
 
 
-def align_lateral(m, side, target, dry=False):
+def _face_lateral(err, dist, ye):
+    """Lateral offset of a face point (robot-frame y = ye, on the face line) from the robot centre, measured
+    ALONG the face: unchanged when the robot turns in place."""
+    x = (dist - ye * math.sin(err)) / math.cos(err)
+    return -x * math.sin(err) + ye * math.cos(err)
+
+
+def lat_error(m, st, gap):
+    """Sideways move (m, + = left) that puts the station's reference face end at its taught lateral position at
+    the final pose: measured along the face (independent of the current heading) and including the drift of
+    the straight drive still to come at the current heading."""
+    ye = end_y(m, st['side'], st['end_y'])
+    taught = _face_lateral(-YAW_OFF[0], FRONT + st['gap'], st['end_y'])
+    now = _face_lateral(m['err'], m['dist'], ye) + (m['dist'] - FRONT - gap) * math.sin(m['err'])
+    return (now - taught) / math.cos(m['err'])
+
+
+def align_lateral(m, st, gap, dry=False):
+    side, target = st['side'], st['end_y']
     for k in range(3):
-        dy = end_y(m, side, target) - target
-        log('lateral: %s end at y=%.4f, target %.4f, error %.4f' % (side, end_y(m, side, target), target, dy))
+        dy = lat_error(m, st, gap)
+        log('lateral: %s end at y=%.4f, target %.4f, error %.4f (along the face, incl. drive drift)' % (side, end_y(m, side, target), target, dy))
         if abs(dy) <= LAT_TOL:
             break
         if abs(dy) > LAT_PLAN_MAX:
@@ -312,7 +332,7 @@ def align_lateral(m, side, target, dry=False):
         if dry:
             break
         step = dy * LAT_GAIN if abs(dy) < 0.05 else dy          # big planned shift: plain command, then refine
-        rel(0.0, 0.0, y=step); m = measure(); log('  re-measure', pub(m))
+        rel(0.0, 0.0, y=step); m = measure() or measure(near=True); log('  re-measure', pub(m))
     return m
 
 
@@ -367,7 +387,7 @@ def plan_approach(m, st, gap):
     another spot): sideways move to the taught lateral position, straight forward to the taught gap, and -
     for a place station - the spot under the tray must be empty.  Any problem -> stop and report."""
     p = RM.remove_self(cloud(), CFG)                          # own points out BEFORE the cloud is shifted below
-    dy = end_y(m, st['side'], st['end_y']) - st['end_y']          # +: robot must move left
+    dy = lat_error(m, st, gap)                                 # +: robot must move left
     fwd = m['dist'] - FRONT - gap; sz = RM.surface_height(p, m['dist'])
     p = accepted_filter(p, st, fwd, dy)
     log('plan: sideways %.3f m, forward %.3f m, surface top %s m' % (dy, fwd, None if sz is None else round(sz, 3)))
@@ -744,7 +764,7 @@ elif cmd == 'accept':
     if not m:
         raise SystemExit('ABORT: no face found ahead')
     target = s0['end_y'] - float(s0.get('lat_offset', 0.0))
-    dy = end_y(m, s0['side'], target) - target; e = m['err'] + YAW_OFF[0]
+    dy = lat_error(m, dict(s0, end_y=target), s0['gap']); e = m['err'] + YAW_OFF[0]
     fwd = m['dist'] - FRONT - s0['gap']
     log('face', pub(m), '| sideways %.3f m, heading %.2f deg, forward %.3f m to the final pose' % (dy, math.degrees(e), fwd))
     if abs(dy) > 0.03 or abs(e) > math.radians(1.5) or not -0.02 <= fwd <= MAX_FWD:
@@ -883,7 +903,7 @@ elif cmd in ('dock', 'redock'):
         raise SystemExit(0)
     if '--closest' in sys.argv:
         # arm motion not fixed yet: go to the requested gap, or as close as the robot + arms + tray stay clear
-        pw = RM.remove_self(cloud(), CFG); dy = end_y(m, st['side'], st['end_y']) - st['end_y']
+        pw = RM.remove_self(cloud(), CFG); dy = lat_error(m, st, gap)
         need_clear(RM.sweep_hits(pw, CFG, 0.0, dy), 'sideways move to the taught position')
         f0 = m['dist'] - FRONT - gap
         pw = accepted_filter(pw, st, f0, dy)
@@ -895,12 +915,13 @@ elif cmd in ('dock', 'redock'):
             log('requested gap %.3f is blocked -> will stop at gap %.3f (closest clear)' % (gap, m['dist'] - FRONT - ok))
             gap = m['dist'] - FRONT - ok
     if '--lineup' in sys.argv:                                 # only the sideways move must be clear here
-        need_clear(RM.sweep_hits(RM.remove_self(cloud(), CFG), CFG, 0.0, end_y(m, st['side'], st['end_y']) - st['end_y']),
+        need_clear(RM.sweep_hits(RM.remove_self(cloud(), CFG), CFG, 0.0, lat_error(m, st, gap)),
                    'sideways move to the taught position')
     else:
         plan_approach(m, st, gap)                              # stops here if the taught approach is blocked
-    m = align_lateral(m, st['side'], st['end_y'], dry)
+    m = align_lateral(m, st, gap, dry)
     m = align_heading(m, dry)
+    m = align_lateral(m, st, gap, dry)                         # again: the drift term depends on the final heading
     fwd = m['dist'] - FRONT - gap
     if '--lineup' in sys.argv:
         # lined up on the approach line, not driven in: e.g. to run "accept NAME" here
@@ -925,7 +946,7 @@ elif cmd in ('dock', 'redock'):
     if not dry:
         rel(fwd + FWD_SHORT, 0.0)
         YLIM[0] = 2.5; f = measure(near=True)
-        res = dict(name=name, gap_target=gap, gap=f['gap'], ang_deg=f['ang_deg'], lat_err=round(end_y(f, st['side'], st['end_y']) - st['end_y'], 4), fwd=round(fwd, 4))
+        res = dict(name=name, gap_target=gap, gap=f['gap'], ang_deg=f['ang_deg'], lat_err=round(lat_error(f, st, f['gap']), 4), fwd=round(fwd, 4))
         log('FINAL', json.dumps(res))
         json.dump(dict(fwd=fwd + FWD_SHORT, gap=gap, t=time.time()), open('/tmp/claude_dock_last.json', 'w'))
         new = not __import__('os').path.exists(LOG_FILE)
@@ -953,6 +974,7 @@ elif cmd == 'over':
 elif cmd == 'check':
     # check NAME [GAP] : at the current pose, report what a docking from here would do. NO MOTION.
     name = args[0]; st = load_st()[name]; gap = float(args[1]) if len(args) > 1 else st['gap']; YLIM[0] = 2.5
+    YAW_OFF[0] = math.radians(float(st.get('yaw_offset', 0.0))); st['end_y'] = st['end_y'] - float(st.get('lat_offset', 0.0))
     ZB[0], ZB[1] = st['z']; p = cloud()
     log('rotation here:', json.dumps(RM.rotation_hits(p, CFG)) or 'clear', '| move needed before turning (x, y):', RM.leave_move(p, CFG, 0.6))
     m = measure()
