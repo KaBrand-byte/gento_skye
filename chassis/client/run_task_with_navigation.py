@@ -83,8 +83,9 @@ class Trial:
 
     def attach_at_carry(self):
         """The arms already stand in the carry (receive) pose (e.g. left there by the previous run): do what
-        skye_task's prepare() does to connect and enable - without any arm or lift motion - and open the grippers
-        for the handover."""
+        skye_task's prepare() does to connect and enable - without any arm or lift motion.  The grippers are NOT
+        opened here (a tray may still be held after a stop); a normal run opens them on arrival at the start
+        station, --holding never opens them before the place station."""
         seq, sdk, gripper = self.sequence, self._sdk, self.gripper
         seq.begin = time.monotonic()
         seq._checkpoint()
@@ -102,8 +103,7 @@ class Trial:
         seq.result.metadata["tool_xyzabc_mm_deg"] = sdk.tools
         seq._record("initialized", status="completed", note="arms already in the carry pose: no arm motion")
         if gripper is not None:
-            gripper.connect()
-            seq._gripper_action("open_before_receive", GripperAction.OPEN)
+            gripper.connect()                               # enables at the measured position: holds what it holds
         seq.prepared = True
         seq._record("awaiting_task_start", status="waiting")
 
@@ -300,19 +300,27 @@ class Trial:
         old = {s: signal.signal(s, lambda *_: self.sequence.request_stop()) for s in (signal.SIGINT, signal.SIGTERM)}
         exit_code = 1
         try:
-            if self.arm_start(config) == "carry":           # before any motion
-                logging.info("双臂已在运输（接盘）位：不动手臂，直接接入")
+            start_pose = self.arm_start(config)             # before any motion
+            if a.holding and start_pose != "carry":
+                raise MotionError("--holding：双臂必须已在运输（接盘）位且夹着托盘")
+            if start_pose == "carry":
+                logging.info("双臂已在运输（接盘）位：不动手臂，直接接入%s", "（夹着托盘，不张爪）" if a.holding else "")
                 self.attach_at_carry()
             else:
                 self.sequence.prepare()                     # arms into the carry (receive) pose
             self.preflight_place()                          # read-only, before the tray is handed over
             if a.selfscan:
                 logging.info("selfscan: %s", self.nav.selfscan())
-            if a.start:
-                self.navigate(a.start)
-            print("已在起始点。放好托盘后按 Enter：双爪闭合，然后出发去放置点；Ctrl-C 停止。", flush=True)
-            wait_for_start(self.sequence)
-            self.close_grippers()
+            if a.holding:
+                logging.info("--holding：托盘已在双爪中，跳过起始点和交接，直接去放置点")
+            else:
+                if a.start:
+                    self.navigate(a.start)
+                if start_pose == "carry" and self.gripper is not None:
+                    self.sequence._gripper_action("open_before_receive", GripperAction.OPEN)   # only now, at T
+                print("已在起始点。放好托盘后按 Enter：双爪闭合，然后出发去放置点；Ctrl-C 停止。", flush=True)
+                wait_for_start(self.sequence)
+                self.close_grippers()
             self.navigate(a.place)
             self.place_and_back_to_carry()                  # forward, down, open, up, back -> carry pose
             if a.start and not a.no_return:
@@ -366,6 +374,8 @@ def main(argv=None):
                    help="夹爪配置（与 skye_task run 相同）")
     p.add_argument("--down-mm", type=float, help="本次放置下降距离 mm（默认用配置，当前 150）")
     p.add_argument("--up-mm", type=float, help="本次放置后上移距离 mm（默认等于下降距离）")
+    p.add_argument("--holding", action="store_true",
+                   help="托盘已在双爪中（例如中途停止后）：不张爪、跳过起始点和交接，直接去放置点")
     p.add_argument("--no-return", action="store_true", help="放置后不返回起始点")
     p.add_argument("--selfscan", action="store_true", help="准备完成后先测手臂／托盘占位（车前约 1 m 需无物体）")
     p.add_argument("--nav-timeout", type=float, default=600.0)

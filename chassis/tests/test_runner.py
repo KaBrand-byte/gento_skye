@@ -200,6 +200,33 @@ class RunnerTests(unittest.TestCase):
         self.assertLess(i("release"), i("place_lift_up"))
         self.assertLess(i("place_lift_up"), i("up"))
 
+    def test_start_in_the_carry_pose_opens_the_grippers_only_at_the_start_station(self):
+        from skye_task.config import load_config
+        data = json.loads(self.cfg.read_text()); data["gripper_enabled"] = True
+        self.cfg.write_text(json.dumps(data))
+        receive = load_config(self.cfg).receive
+        with mock.patch.object(runner.Trial, "make_sequence", make_sequence_with_fake_gripper):
+            code, report = self.run_trial(arms=receive)
+        self.assertEqual(code, 0)
+        events = [e for e in FakeNav.log if e[0] in ("grip", "start")]
+        self.assertEqual(events[:3], [("start", "T"), ("grip", "open"), ("grip", "close")])
+
+    def test_holding_never_opens_before_the_place_station(self):
+        from skye_task.config import load_config
+        data = json.loads(self.cfg.read_text()); data["gripper_enabled"] = True
+        self.cfg.write_text(json.dumps(data))
+        receive = load_config(self.cfg).receive
+        with mock.patch.object(runner.Trial, "make_sequence", make_sequence_with_fake_gripper):
+            code, report = self.run_trial(arms=receive, extra=["--holding"])
+        self.assertEqual(code, 0)
+        events = [e for e in FakeNav.log if e[0] in ("grip", "start")]
+        self.assertEqual(events, [("start", "D"), ("grip", "open"), ("start", "undock"), ("start", "T")])
+
+    def test_holding_requires_the_carry_pose(self):
+        code, report = self.run_trial(extra=["--holding"])                  # arms at ready
+        self.assertEqual(code, 1)
+        self.assertNotIn(("start", "D"), FakeNav.log)
+
     def test_no_return(self):
         code, report = self.run_trial(extra=["--no-return"])
         self.assertEqual(code, 0)

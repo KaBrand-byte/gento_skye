@@ -29,7 +29,9 @@ HALF_W = 0.274
 
 DEFAULT = {
     'shoulder_z': 1.45,                       # tray >= 1.2 m means the forearms are at ~1.2 m -> shoulder ~1.45 m
-    'tray': {'front': 0.45, 'depth': 0.35, 'width': 0.45, 'z_bottom': 1.20, 'height': 0.10},
+    # envelope of a tray held between the grippers in the carry pose, however it was handed over (measured:
+    # back edge 0.33-0.45 m, front 0.74 m, bottom 0.90-0.95 m in front of / above the base)
+    'tray': {'front': 0.462, 'depth': 0.50, 'width': 0.44, 'z_bottom': 0.88, 'height': 0.22},
     'phases': {
         'carry': [[0.00, 0.70, -0.44, 0.44, 's-0.35', 's+0.12']],   # arms holding the tray (measured width +-0.41)
     },
