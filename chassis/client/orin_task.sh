@@ -22,9 +22,18 @@ env_setup() {
 case "${1:-start}" in
   run)        # internal: what runs inside tmux; the window always stays open so errors can be read
     shift; set +e; env_setup
-    python3 chassis/client/run_task_with_navigation.py --config "${GENTO_TASK_CONFIG:-config/default.json}" "$@"
-    rc=$?
-    echo; echo "task finished (exit $rc) - result in $REPO/runs/with-navigation.json; press Enter to close"; read -r _ ;;
+    N=1; if [ "$1" = "--cycles" ]; then N=$2; shift 2; fi      # --cycles N: N full tasks in a row (success rate)
+    ok=0; LOG="$REPO/runs/cycles.log"; mkdir -p "$REPO/runs"
+    [ "$N" -gt 1 ] && echo "===== $(date '+%F %T') start $N cycles: $*" >> "$LOG"
+    for i in $(seq 1 "$N"); do
+      [ "$N" -gt 1 ] && echo && echo "=================== 第 $i/$N 次 ==================="
+      RES="$REPO/runs/with-navigation.json"; [ "$N" -gt 1 ] && RES="$REPO/runs/cycle-$(printf %02d "$i").json"
+      GENTO_CYCLE="$i/$N" python3 chassis/client/run_task_with_navigation.py           --config "${GENTO_TASK_CONFIG:-config/default.json}" --result "$RES" "$@"
+      rc=$?; [ $rc -eq 0 ] && ok=$((ok + 1))
+      [ "$N" -gt 1 ] && echo "$(date '+%F %T') cycle $i/$N exit $rc  (ok $ok/$i)  $RES" | tee -a "$LOG"
+      [ $rc -ne 0 ] && break                     # state unknown after a failure: stop the series
+    done
+    echo; echo "finished: $ok of $N successful (last exit $rc) - results in $REPO/runs/; press Enter to close"; read -r _ ;;
   start)
     shift
     # tmux needs a usable terminal type (Windows ssh -t may send none or one the Orin does not know)

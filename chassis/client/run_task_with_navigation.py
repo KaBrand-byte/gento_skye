@@ -27,6 +27,7 @@ from copy import deepcopy
 import dataclasses
 from datetime import datetime, timezone
 import logging
+import os
 from pathlib import Path
 import signal
 import sys
@@ -318,7 +319,13 @@ class Trial:
                     self.navigate(a.start)
                 if start_pose == "carry" and self.gripper is not None:
                     self.sequence._gripper_action("open_before_receive", GripperAction.OPEN)   # only now, at T
-                print("已在起始点。放好托盘后按 Enter：双爪闭合，然后出发去放置点；Ctrl-C 停止。", flush=True)
+                cycle = os.environ.get("GENTO_CYCLE", "")
+                prefix = f"第 {cycle} 次：" if cycle and cycle != "1/1" else ""
+                bar = "=" * 60
+                print(chr(7))                                       # terminal bell
+                print(bar)
+                print(f"  {prefix}机器人已到 T。请递篮子，放好后按 Enter（双爪闭合，出发去放置点）；Ctrl-C 停止。")
+                print(bar, flush=True)
                 wait_for_start(self.sequence)
                 self.close_grippers()
             self.navigate(a.place)

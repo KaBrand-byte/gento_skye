@@ -19,7 +19,7 @@
 #   stop       software stop: kill job, cancel moves + tasks, soft manual
 #   log        follow the job log (Ctrl+C to leave; the job keeps running)
 #   task [args]    START THE FULL TASK (arms + navigation) in tmux on the Orin           (asks y/n)
-#                  args e.g. --down-mm 120 | --holding | --no-return | --start ''
+#                  args e.g. --cycles 10 | --down-mm 120 | --holding | --no-return | --start ''
 #   task-attach    show the running task again (Ctrl-b d detaches; the task keeps running)
 #   task-stop      stop the task (arms + chassis) and software-stop the chassis
 #   task-check     no motion: task config + SDK version on the Orin
