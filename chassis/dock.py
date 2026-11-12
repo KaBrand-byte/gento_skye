@@ -750,7 +750,41 @@ def leave_map_station():
             log('at map station %s: back to its safe point first (x %.2f, y %.2f)' % (nm, sx, sy))
             translate(sx, sy)
             return True
+    # lidar station after undock (e.g. D): on its approach line, facing it, within reach of its safe point -
+    # go back to the safe point (the reverse of the approach's sideways move): room to turn there, unlike in
+    # front of the station where the vendor's turn creeps past table legs (measured: 38-54 s for the T leg)
+    for nm, st in load_st().items():
+        if st.get('mode') == 'map' or 'staging_pose' not in st or 'pose' not in st:
+            continue
+        x, y, yaw = settled_pose()
+        fx, fy, fh = st['pose']; h = math.radians(fh)
+        ahead = math.cos(h) * (fx - x) + math.sin(h) * (fy - y)        # distance to the final pose along its line
+        side = -math.sin(h) * (x - fx) + math.cos(h) * (y - fy)
+        dh = abs((yaw - h + math.pi) % (2 * math.pi) - math.pi)
+        if 0.2 < ahead < MAX_FWD + 0.3 and abs(side) < 0.4 and dh < math.radians(20):
+            sx, sy, _ = rel_target(st['staging_pose'])
+            if math.hypot(sx, sy) > 1.6:
+                continue
+            log('in front of %s: to its safe point first (x %.2f, y %.2f)' % (nm, sx, sy))
+            translate(sx, sy)
+            return True
     return False
+
+
+def face_towards(xy, min_deg=15.0):
+    """Before handing over to the vendor navigation: turn in place towards the next destination, if that turn
+    is clear with the arms + tray (the vendor's own start turn only sees obstacles below 0.8 m and creeps near
+    table legs).  Not clear -> leave the turn to the vendor, as before."""
+    x, y, yaw = settled_pose()
+    d = (math.atan2(xy[1] - y, xy[0] - x) - yaw + math.pi) % (2 * math.pi) - math.pi
+    if abs(d) < math.radians(min_deg):
+        return
+    h = RM.rotation_hits(cloud(fresh=True), CFG)
+    if h:
+        log('pre-turn towards the destination skipped (not clear: %s)' % json.dumps(h))
+        return
+    log('pre-turn %.1f deg towards the destination' % math.degrees(d))
+    rel(0.0, d)
 
 
 def cancel_all_tasks():
@@ -1043,12 +1077,15 @@ elif cmd in ('dock', 'redock'):
                 setmode(0)
                 raise SystemExit(0)
         if '--leave' in sys.argv:
-            leave_map_station()                 # at a map station: back to its safe point first
+            leave_map_station()                 # at / in front of a station: back to its safe point first
         if RM.rotation_hits(cloud(), CFG):
             if '--leave' not in sys.argv:
                 need_clear(RM.rotation_hits(cloud(), CFG), 'turning at the start position (navigation turns in place '
                            'first; use --leave to move out first)')
             move_to_turn_spot(0.6)
+        dest = st['staging_pose'][:2] if 'staging_pose' in st else st.get('staging_xy')
+        if dest:
+            face_towards(dest)                  # our checked turn instead of the vendor's start turn
         if not S[0].is_soft_auto:
             setmode(0)
         out = nav_task(st)                                      # in-process service call (no extra process)
