@@ -1002,6 +1002,18 @@ elif cmd in ('dock', 'redock'):
         if not S[0].is_hard_auto:
             raise SystemExit('ABORT: hard switch is on MANUAL - switch it to AUTO first')
         check_localisation()
+        if st.get('mode') == 'map' and 'pose' in st:
+            dx, dy, da = rel_target(st['pose'])
+            if math.hypot(dx, dy) < 0.15 and abs(da) < math.radians(10):
+                # already standing at this station (e.g. a new run starts where the last one ended): only the
+                # fine correction, no round trip over the safe point
+                log('already at %s (%.3f m, %.1f deg): fine correction only' % (name, math.hypot(dx, dy), math.degrees(da)))
+                if os.path.exists(os.path.join(REF_DIR, name + '.npy')):
+                    dx, dy, da = ref_approach(name)
+                log('FINAL', json.dumps(dict(name=name, mode='map+ref', err_x=round(dx, 4), err_y=round(dy, 4),
+                                             err_yaw_deg=round(math.degrees(da), 2), note='already there')))
+                setmode(0)
+                raise SystemExit(0)
         if '--leave' in sys.argv:
             leave_map_station()                 # at a map station: back to its safe point first
         if RM.rotation_hits(cloud(), CFG):
