@@ -1,0 +1,16 @@
+[Unit]
+Description=Gento docking ROS 2 bridge (/gento_dock/cmd, /gento_dock/status)
+After=linkhou_robot.service network-online.target
+
+[Service]
+User=@USER@
+Group=@USER@
+ExecStartPre=/bin/sleep 60
+ExecStart=/usr/bin/bash -c "source @DIR@/env.sh && exec python3 @DIR@/dock_bridge.py"
+Restart=always
+RestartSec=5
+KillMode=mixed
+TimeoutStopSec=10
+
+[Install]
+WantedBy=multi-user.target

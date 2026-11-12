@@ -1,0 +1,5 @@
+{
+ "T": {"staging": 20100001, "staging_xy": [2.036, 1.878], "side": "left", "gap": 0.45, "end_y": 0.886, "z": [0.45, 0.9]},
+ "D": {"staging": 20100003, "staging_xy": [2.697, -2.31], "side": "left", "gap": 0.25, "end_y": 0.515, "z": [0.1, 0.7],
+       "place": true, "untaught": true}
+}

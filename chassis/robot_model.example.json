@@ -1,0 +1,5 @@
+{
+ "_comment": "Measured by 'run.sh selfscan' (arms + tray in carry pose, nothing within ~1 m in front). Values below: arms LOW, no tray (2026-11-11). Re-run selfscan in the real carry pose.",
+ "tray": {"front": 0.45, "depth": 0.35, "width": 0.45, "z_bottom": 1.2, "height": 0.1},
+ "phases": {"carry": [[0.111, 0.693, -0.439, 0.439, 0.819, 1.238]]}
+}

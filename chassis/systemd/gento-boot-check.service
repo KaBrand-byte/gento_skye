@@ -1,0 +1,12 @@
+[Unit]
+Description=Gento boot check: cancel leftover tasks and verify/fix localisation (never moves the robot)
+After=linkhou_robot.service network-online.target
+
+[Service]
+User=@USER@
+Group=@USER@
+Type=oneshot
+ExecStart=/usr/bin/bash @DIR@/boot_check.sh
+TimeoutStartSec=900
+KillMode=mixed
+TimeoutStopSec=15
