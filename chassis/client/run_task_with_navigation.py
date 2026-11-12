@@ -23,6 +23,8 @@ finished; for a place station it has also checked that the place motion (forward
 """
 
 import argparse
+from copy import deepcopy
+import dataclasses
 from datetime import datetime, timezone
 import logging
 from pathlib import Path
@@ -38,6 +40,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from gento_navigation import GentoNavigation, NavigationError  # noqa: E402
 from skye_task.__main__ import wait_for_start, write_report  # noqa: E402
 from skye_task.config import load_config  # noqa: E402
+from skye_task.geometry import local_displacement, translated  # noqa: E402
 from skye_task.interfaces import GripperAction, GripperTarget  # noqa: E402
 from skye_task.sdk import GentoSDK, MotionError  # noqa: E402
 from skye_task.sequence import FIXED_AXES, Result, Sequence  # noqa: E402
@@ -102,6 +105,31 @@ class Trial:
         seq.prepared = True
         seq._record("awaiting_task_start", status="waiting")
 
+    def place_segments(self):
+        c = self.sequence.config
+        return (("forward", [[c.forward_mm, 0, 0]] * 2, c.forward), ("down", [[0, 0, -c.down_mm]] * 2, c.down),
+                ("up", [[0, 0, c.up_mm]] * 2, c.up), ("back_to_carry", [[-c.forward_mm, 0, 0]] * 2, c.forward))
+
+    def preflight_place(self):
+        """Read-only: plan the whole place motion (forward, down, up, back) from the carry pose the arms are in
+        now, BEFORE the tray is handed over - if it cannot be planned, stop here rather than at the place station
+        with the tray held out over the belt."""
+        seq, sdk, c = self.sequence, self._sdk, self.sequence.config
+        predicted = deepcopy(sdk.read())
+        for name, deltas, motion in self.place_segments():
+            starts = [sdk.forward(i, predicted.joints[i]) for i in range(2)]
+            shoulders = sdk.shoulders(predicted)
+            targets = [translated(starts[i], local_displacement(shoulders[i], deltas[i])) for i in range(2)]
+            try:
+                trajectories = sdk.plan_linear(predicted, starts, targets, motion)
+            except Exception as error:
+                raise MotionError(f"放置动作只读规划失败（{name}；前伸 {c.forward_mm}、下降 {c.down_mm}、上移 {c.up_mm} mm）："
+                                  f"{error}。可加参数 --down-mm 130 或 120 再运行") from error
+            for i, trajectory in enumerate(trajectories):
+                predicted.rt["arms"][i]["fb"]["fb_pos"] = trajectory.endpoint
+        seq.result.metadata["place_motion_mm"] = {"forward": c.forward_mm, "down": c.down_mm, "up": c.up_mm}
+        logging.info("放置动作只读规划通过：前伸 %s、下降 %s、上移 %s mm，再后移回运输位", c.forward_mm, c.down_mm, c.up_mm)
+
     def place_and_back_to_carry(self):
         """Place with skye_task's own motion steps - forward, down, open, up - then back by the forward distance,
         i.e. straight back into the carry pose along the path just taken (his start() ends at the ready pose via
@@ -113,14 +141,13 @@ class Trial:
         if any(feedback.trajectory_states):
             raise MotionError("放置前双臂轨迹尚未空闲")
         seq.started = True
-        seq._move_linear("forward", [[c.forward_mm, 0, 0]] * 2, c.forward)
-        seq._move_linear("down", [[0, 0, -c.down_mm]] * 2, c.down)
-        if self.gripper is not None:
-            seq._gripper_action("release", GripperAction.OPEN)
-        else:
-            seq._record("release", status="skipped", reason="配置关闭夹爪")
-        seq._move_linear("up", [[0, 0, c.up_mm]] * 2, c.up)
-        seq._move_linear("back_to_carry", [[-c.forward_mm, 0, 0]] * 2, c.forward)
+        for name, deltas, motion in self.place_segments():
+            seq._move_linear(name, deltas, motion)
+            if name == "down":
+                if self.gripper is not None:
+                    seq._gripper_action("release", GripperAction.OPEN)
+                else:
+                    seq._record("release", status="skipped", reason="配置关闭夹爪")
         feedback = seq.checked_feedback()
         if any(not seq._near(a, t) for a, t in zip(feedback.joints, c.receive)):
             seq._move_joint("carry", c.receive)          # tiny correction if the planner ended a little off
@@ -223,6 +250,10 @@ class Trial:
     def run(self):
         a = self.args
         config = load_config(a.config)
+        if a.down_mm is not None or a.up_mm is not None:      # this run only; the config file stays as it is
+            down = config.down_mm if a.down_mm is None else a.down_mm
+            config = dataclasses.replace(config, down_mm=down, up_mm=a.up_mm if a.up_mm is not None else down)
+            logging.info("本次运行：下降 %s mm，上移 %s mm（配置文件不变）", config.down_mm, config.up_mm)
         gaps = {k: v for k, v in ((a.start, a.start_gap), (a.place, a.place_gap)) if v is not None}
         self.nav = GentoNavigation(transport=a.transport, ssh_target=a.ssh_target, gaps=gaps)
         sdk = GentoSDK(config)
@@ -236,6 +267,7 @@ class Trial:
                 self.attach_at_carry()
             else:
                 self.sequence.prepare()                     # arms into the carry (receive) pose
+            self.preflight_place()                          # read-only, before the tray is handed over
             if a.selfscan:
                 logging.info("selfscan: %s", self.nav.selfscan())
             if a.start:
@@ -294,6 +326,8 @@ def main(argv=None):
     p.add_argument("--ssh-target", default="chassis")
     p.add_argument("--gripper-config", type=Path, default=ROOT / "config" / "gripper-can.json",
                    help="夹爪配置（与 skye_task run 相同）")
+    p.add_argument("--down-mm", type=float, help="本次放置下降距离 mm（默认用配置，当前 150）")
+    p.add_argument("--up-mm", type=float, help="本次放置后上移距离 mm（默认等于下降距离）")
     p.add_argument("--no-return", action="store_true", help="放置后不返回起始点")
     p.add_argument("--selfscan", action="store_true", help="准备完成后先测手臂／托盘占位（车前约 1 m 需无物体）")
     p.add_argument("--nav-timeout", type=float, default=600.0)

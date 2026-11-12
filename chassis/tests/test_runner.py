@@ -171,6 +171,14 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertNotIn(("start", "T"), FakeNav.log)                     # nothing moved
 
+    def test_down_distance_can_be_set_for_one_run(self):
+        code, report = self.run_trial(extra=["--down-mm", "120"])
+        self.assertEqual(code, 0)
+        self.assertEqual(report["metadata"]["place_motion_mm"]["down"], 120)
+        self.assertEqual(report["metadata"]["place_motion_mm"]["up"], 120)
+        down = [s for s in report["steps"] if s["name"] == "down_target"][0]
+        self.assertEqual(down["robot_displacements_mm"], [[0, 0, -120], [0, 0, -120]])
+
     def test_no_return(self):
         code, report = self.run_trial(extra=["--no-return"])
         self.assertEqual(code, 0)

@@ -24,7 +24,7 @@
 #   job        job status JSON (what the skye_task adapter reads)
 #   task [args]    START THE FULL TASK on the Orin (arms + navigation, in tmux)       (MOVES, asks y/n)
 #                  T -> Enter -> D -> place -> reverse out -> arms to carry pose -> back to T
-#                  args e.g. --selfscan | --no-return | --start '' | --place-gap 0.30
+#                  args e.g. --down-mm 120 (this run only; default from the config) | --no-return | --start ''
 #   task-attach    re-attach to the running task (after a Wi-Fi drop); Ctrl-b d detaches, task keeps running
 #   task-stop      Ctrl-C to the task (stops arms + chassis) and software-stop the chassis
 #   task-check     no motion: task config + SDK version on the Orin
