@@ -321,6 +321,18 @@ def lat_error(m, st, gap):
     return (now - taught) / math.cos(m['err'])
 
 
+STAGE2 = 0.30          # m: the last part of a long approach is driven after a fresh measurement
+
+
+def measure_station(st, gap, expect_dist):
+    """Fit the station's face: far and near fits can find different faces (e.g. a table leg close by); take the
+    one closest to where the station's face should be."""
+    cands = [c for c in (measure(near=True), measure()) if c]
+    if not cands:
+        raise SystemExit('ABORT: station face lost during the approach')
+    return min(cands, key=lambda c: abs(lat_error(c, st, gap)) + abs(c['dist'] - expect_dist))
+
+
 def align_lateral(m, st, gap, dry=False):
     side, target = st['side'], st['end_y']
     for k in range(3):
@@ -496,15 +508,29 @@ def turn_to(h):
 
 
 # ---- map-positioned stations (mode "map"): no edge to dock against; the final pose comes from the map ----
-MAP_TOL = 0.02                  # m: map localisation noise is ~1-2 cm, sideways moves below ~1 cm are unreliable
-MAP_ANG = math.radians(1.0)
+MAP_TOL = 0.04                  # m: near T the map pose jumps by up to ~10 cm after small moves (measured), so
+MAP_ANG = math.radians(1.5)     # corrections below this only chase localisation noise
+MAP_CORRECTIONS = 1             # after the main translation
 MAP_MAX_MOVE = 2.5              # m: longest straight translation from the safe point to the station
 
 
+def settled_pose(timeout=4.0):
+    """Map pose once the localisation has caught up after a move (measured: it keeps correcting for ~1 s after
+    the robot stops; with a fixed short wait the corrections chased stale poses by up to 10 cm)."""
+    spin(0.4); last = map_pose(); t0 = time.time()
+    while time.time() - t0 < timeout:
+        spin(0.4); cur = map_pose()
+        if (math.hypot(cur[0] - last[0], cur[1] - last[1]) < 0.003
+                and abs((cur[2] - last[2] + math.pi) % (2 * math.pi) - math.pi) < math.radians(0.2)):
+            return cur
+        last = cur
+    log('  localisation still moving after %.0f s - using the latest pose' % timeout)
+    return last
+
+
 def rel_target(pose_deg):
-    """(dx, dy, dyaw) from the current map pose to a map pose [x, y, yaw_deg], in the robot frame."""
-    spin(0.6)                                   # let the localisation catch up after a move
-    x, y, yaw = map_pose(); tx, ty, th = pose_deg; th = math.radians(th)
+    """(dx, dy, dyaw) from the current (settled) map pose to a map pose [x, y, yaw_deg], in the robot frame."""
+    x, y, yaw = settled_pose(); tx, ty, th = pose_deg; th = math.radians(th)
     c, s = math.cos(yaw), math.sin(yaw); wx, wy = tx - x, ty - y
     return c * wx + s * wy, -s * wx + c * wy, (th - yaw + math.pi) % (2 * math.pi) - math.pi
 
@@ -529,11 +555,110 @@ def translate(dx, dy):
                      % (dx, dy, json.dumps(RM.sweep_hits(p, CFG, dx, dy))))
 
 
+# ---- reference-scan positioning (map stations with a recorded scan): ~1 cm instead of the map's ~10 cm ----
+REF_DIR = os.path.join(HERE, 'refs')
+REF_TOL, REF_ANG = 0.015, math.radians(0.8)
+
+
+def scan2d(p=None):
+    """Fixed surroundings as 3-D points (robot frame) at heights with vertical structure only - legs and cabinet
+    sides (0.35-0.65 m), walls / boards / frames (1.0-1.7 m); table and belt tops (flat areas) carry no position
+    information and would hold ICP at its start.  Own points out, within 3.5 m, 2 cm grid."""
+    p = RM.remove_self(cloud(fresh=True) if p is None else p, CFG)
+    z = p[:, 2]
+    p = p[(((z > 0.35) & (z < 0.65)) | ((z > 1.0) & (z < 1.7))) & (np.hypot(p[:, 0], p[:, 1]) < 3.5)]
+    return np.unique(np.round(p / 0.02), axis=0) * 0.02
+
+
+def _normals_xy(ref, radius=0.06):
+    """Unit surface normal in the horizontal plane per reference point (PCA of its 3-D neighbours' x, y) and
+    whether that point lies on a clear vertical surface (thin, elongated neighbourhood)."""
+    from scipy.spatial import cKDTree
+    tree = cKDTree(ref); nrm = np.zeros((len(ref), 2)); good = np.zeros(len(ref), bool)
+    for i, nb in enumerate(tree.query_ball_point(ref, radius)):
+        if len(nb) < 5:
+            continue
+        q = ref[nb, :2] - ref[nb, :2].mean(0); w, v = np.linalg.eigh(q.T @ q)
+        if w[1] > 1e-6 and w[0] < 0.1 * w[1]:
+            nrm[i] = v[:, 0]; good[i] = True
+    return nrm, good
+
+
+def icp2d(src, ref, max_d=0.30, iters=30, nrm=None):
+    """Trimmed point-to-plane ICP on 3-D points, solving only the planar motion (x, y, yaw):
+    (R, t, rms, inlier fraction) with ref_xy ~ R @ src_xy + t, or None."""
+    from scipy.spatial import cKDTree
+    if nrm is None:
+        nrm = _normals_xy(ref)
+    nv, good = nrm
+    tree = cKDTree(ref); th = 0.0; t = np.zeros(2); rms = None; frac = 0.0
+    for _ in range(iters):
+        c, s_ = math.cos(th), math.sin(th); R = np.array([[c, -s_], [s_, c]])
+        sx = src[:, :2] @ R.T + t
+        d, idx = tree.query(np.column_stack([sx, src[:, 2]]), distance_upper_bound=max_d)
+        ok = np.isfinite(d)
+        if ok.sum() < 100:
+            return None
+        ok &= d <= np.percentile(d[ok], 80)                    # trim: people, moved chairs, the robot's shadow
+        frac = float(ok.sum()) / len(src); rms = float(np.sqrt((d[ok] ** 2).mean()))
+        ok &= good[np.where(ok, idx, 0)]
+        if ok.sum() < 50:
+            return None
+        P, B, N = sx[ok], ref[idx[ok], :2], nv[idx[ok]]
+        r = ((P - B) * N).sum(1)                               # point-to-plane residuals
+        J = np.column_stack([-P[:, 1] * N[:, 0] + P[:, 0] * N[:, 1], N[:, 0], N[:, 1]])
+        dx = -np.linalg.lstsq(J, r, rcond=None)[0]
+        dth, dt = float(dx[0]), dx[1:]
+        cd, sd = math.cos(dth), math.sin(dth)
+        t = np.array([[cd, -sd], [sd, cd]]) @ t + dt; th += dth
+        max_d = max(0.06, max_d * 0.8)
+        if abs(dth) < 2e-5 and np.hypot(*dt) < 2e-4:
+            break
+    c, s_ = math.cos(th), math.sin(th)
+    return np.array([[c, -s_], [s_, c]]), t, rms, frac
+
+
+_REF_NRM = {}
+
+
+def ref_offset(name):
+    """(dx, dy, dyaw) in the robot frame from here to the pose where the reference scan of `name` was taken."""
+    ref = np.load(os.path.join(REF_DIR, name + '.npy'))
+    if name not in _REF_NRM:
+        _REF_NRM[name] = _normals_xy(ref)
+    r = icp2d(scan2d(), ref, nrm=_REF_NRM[name])
+    if r is None:
+        raise SystemExit('ABORT: the scan does not match the reference of %s (too few common points)' % name)
+    R, t, rms, frac = r; th = math.atan2(R[1, 0], R[0, 0])
+    d = R.T @ (-t)
+    log('  scan match: rms %.3f m, %.0f%% matched, to go x %.3f y %.3f yaw %.2f deg' % (rms, 100 * frac, d[0], d[1], -math.degrees(th)))
+    if rms > 0.04 or frac < 0.5:
+        raise SystemExit('ABORT: poor match with the reference of %s (rms %.3f m, %.0f%%) - surroundings changed? '
+                         'teach-ref again' % (name, rms, 100 * frac))
+    return float(d[0]), float(d[1]), -th
+
+
+def ref_approach(name):
+    for it in range(4):
+        dx, dy, da = ref_offset(name)
+        if math.hypot(dx, dy) <= REF_TOL and abs(da) <= REF_ANG:
+            break
+        if math.hypot(dx, dy) > 0.5 or abs(da) > math.radians(12):
+            raise SystemExit('ABORT: reference match says %.2f m / %.1f deg away - not trusted' % (math.hypot(dx, dy), math.degrees(da)))
+        if abs(da) > math.radians(1.0):                         # below ~1 deg the chassis does not turn at all
+            need_clear(RM.turn_hits(cloud(), CFG, da), 'heading correction')
+            rel(0.0, da)
+            continue
+        translate(dx, dy)
+    dx, dy, da = ref_offset(name)
+    return dx, dy, da
+
+
 def map_approach(name, st, dry):
     """From the safe point: turn in place to the station heading (clear there), translate straight to the
     station, then correct with the map pose until within MAP_TOL / MAP_ANG."""
     turn_to(math.radians(st['pose'][2]))
-    for it in range(6):
+    for it in range(2 + MAP_CORRECTIONS):
         dx, dy, da = rel_target(st['pose'])
         log('map approach %d: to go x %.3f y %.3f m, yaw %.2f deg' % (it, dx, dy, math.degrees(da)))
         if math.hypot(dx, dy) <= MAP_TOL and abs(da) <= MAP_ANG:
@@ -551,6 +676,12 @@ def map_approach(name, st, dry):
         translate(dx, dy)
     else:
         log('map approach: stopping after %d corrections' % it)
+    if os.path.exists(os.path.join(REF_DIR, name + '.npy')):
+        # the map is only good to ~10 cm here: finish against the recorded reference scan
+        dx, dy, da = ref_approach(name)
+        log('FINAL', json.dumps(dict(name=name, mode='map+ref', err_x=round(dx, 4), err_y=round(dy, 4),
+                                     err_yaw_deg=round(math.degrees(da), 2))))
+        return
     dx, dy, da = rel_target(st['pose'])
     log('FINAL', json.dumps(dict(name=name, mode='map', err_x=round(dx, 4), err_y=round(dy, 4),
                                  err_yaw_deg=round(math.degrees(da), 2), pose=[round(v, 3) for v in map_pose()[:2]])))
@@ -787,6 +918,25 @@ elif cmd == 'accept':
         % (name, len(q), len(vox), q[:, 0].min(), q[:, 0].max(), q[:, 1].min(), q[:, 1].max(), q[:, 2].min(), q[:, 2].max()))
     if len(q) > 3000:
         log('WARNING: that is a lot - make sure no person or loose item was in front of the robot')
+elif cmd == 'teach-ref':
+    # teach-ref NAME : NO MOTION.  The robot stands EXACTLY at the final pose of map station NAME.  Records the
+    # surroundings as a reference scan (and the map pose); docking at NAME then finishes against this scan.
+    name = args[0]; st = load_st()
+    if name not in st:
+        raise SystemExit('ABORT: unknown station %s' % name)
+    check_localisation()
+    ref = scan2d()
+    if len(ref) < 300:
+        raise SystemExit('ABORT: too little fixed structure around (%d points) for a reference scan' % len(ref))
+    r = icp2d(scan2d(), ref)                                # repeatability: a second scan against the first
+    os.makedirs(REF_DIR, exist_ok=True); np.save(os.path.join(REF_DIR, name + '.npy'), ref)
+    x, y, yaw = settled_pose()
+    st[name].update(pose=[round(x, 3), round(y, 3), round(math.degrees(yaw), 2)], ref=True,
+                    taught=time.strftime('%Y-%m-%d %H:%M:%S'))
+    json.dump(st, open(ST_FILE, 'w'), indent=1)
+    log('reference scan of %s: %d points; repeat scan matches with rms %s m, offset %s m' % (
+        name, len(ref), None if r is None else round(r[2], 4), None if r is None else round(float(np.hypot(*r[1])), 4)))
+    log('taught', name, json.dumps(st[name]))
 elif cmd == 'restage':
     # restage NAME [BACK] : NO MOTION.  Recompute the staging spot of a station taught with teach-pose, from
     # the current scan (robot anywhere near the station, localisation good), e.g. after the robot model changed.
@@ -947,11 +1097,26 @@ elif cmd in ('dock', 'redock'):
             fwd = ok; gap = m['dist'] - FRONT - ok
     plan_approach(m, st, gap)                                  # re-check right before driving in
     if not dry:
-        rel(fwd + FWD_SHORT, 0.0)
+        total = 0.0
+        if fwd > STAGE2 + 0.15:
+            # long straight drives drift sideways (~2 cm over 1.1 m, measured): stop STAGE2 short, measure again,
+            # correct sideways / heading (re-checked against the live cloud), then drive the last part
+            first = fwd - STAGE2
+            rel(first + FWD_SHORT, 0.0); total += first + FWD_SHORT
+            m = measure_station(st, gap, m['dist'] - first)
+            log('  stage 2 measure', pub(m))
+            plan_approach(m, st, gap)
+            m = align_lateral(m, st, gap)
+            m = align_heading(m)
+            m = align_lateral(m, st, gap)
+            fwd = m['dist'] - FRONT - gap
+            log('forward %.3f m (last stage)' % fwd)
+            plan_approach(m, st, gap)
+        rel(fwd + FWD_SHORT, 0.0); total += fwd + FWD_SHORT
         YLIM[0] = 2.5; f = measure(near=True)
         res = dict(name=name, gap_target=gap, gap=f['gap'], ang_deg=f['ang_deg'], lat_err=round(lat_error(f, st, f['gap']), 4), fwd=round(fwd, 4))
         log('FINAL', json.dumps(res))
-        json.dump(dict(fwd=fwd + FWD_SHORT, gap=gap, t=time.time()), open('/tmp/claude_dock_last.json', 'w'))
+        json.dump(dict(fwd=total, gap=gap, t=time.time()), open('/tmp/claude_dock_last.json', 'w'))
         new = not __import__('os').path.exists(LOG_FILE)
         with open(LOG_FILE, 'a') as fh:
             if new:

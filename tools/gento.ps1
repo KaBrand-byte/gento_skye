@@ -15,6 +15,7 @@
 #                         face, and a staging pose BACK m (default 0.5) straight behind it
 #   teach-staging NAME [map]  NO MOTION: robot at a safe point near NAME (room to turn): record it as NAME's
 #                         staging point; map = dock NAME by map position (turn there, translate straight in)
+#   teach-ref NAME        NO MOTION: robot exactly at map station NAME: record a reference scan (~1 cm docking)
 #   accept NAME [clear]   NO MOTION: robot lined up in front of NAME: structure the model touches there was
 #                         verified clear on site -> docking ignores exactly those points
 #   restage NAME          NO MOTION: recompute the staging spot of a taught station from here (robot near it)
@@ -58,6 +59,7 @@ switch ($Cmd) {
     'tune'     { ssh chassis "$remote tune $Arg $($Rest -join ' ')" }
     'teach-pose' { ssh chassis "$remote teach-pose $Arg $($Rest -join ' ')" }
     'teach-staging' { ssh chassis "$remote teach-staging $Arg $($Rest -join ' ')" }
+    'teach-ref' { ssh chassis "$remote teach-ref $Arg" }
     'accept'   { ssh chassis "$remote accept $Arg $($Rest -join ' ')" }
     'restage'  { ssh chassis "$remote restage $Arg $($Rest -join ' ')" }
     'lineup'   { Confirm-Motion "line up in front of station $Arg (not driving in)"; ssh -t chassis "$remote lineup $Arg && $remote follow" }
@@ -92,5 +94,5 @@ switch ($Cmd) {
         }
         Start-Process 'chrome.exe' 'http://localhost:8080'
     }
-    default    { Get-Content $PSCommandPath -TotalCount 37 | Select-Object -Skip 1 }
+    default    { Get-Content $PSCommandPath -TotalCount 38 | Select-Object -Skip 1 }
 }
