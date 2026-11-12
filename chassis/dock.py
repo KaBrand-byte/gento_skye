@@ -825,7 +825,7 @@ elif cmd in ('dock', 'redock'):
             setmode(0)
             raise SystemExit(0)
         if 'staging_pose' in st:   # pose tasks keep the start heading: turn to the face here (staging is clear all round)
-            turn_to(math.radians(st['staging_pose'][2]))
+            turn_to(math.radians(st.get('pose', st['staging_pose'])[2]))     # face the way the final pose faces
     m = measure() or measure(near=True)          # near: staging spots right beside the final pose
     if not m:
         raise SystemExit('ABORT: no face found ahead')
@@ -886,10 +886,20 @@ elif cmd in ('dock', 'redock'):
             ok = max(0.0, ok - CLOSEST_SLACK)      # never plan exactly at the limit: the sideways move shifts things
             log('requested gap %.3f is blocked -> will stop at gap %.3f (closest clear)' % (gap, m['dist'] - FRONT - ok))
             gap = m['dist'] - FRONT - ok
-    plan_approach(m, st, gap)                                  # stops here if the taught approach is blocked
+    if '--lineup' in sys.argv:                                 # only the sideways move must be clear here
+        need_clear(RM.sweep_hits(RM.remove_self(cloud(), CFG), CFG, 0.0, end_y(m, st['side'], st['end_y']) - st['end_y']),
+                   'sideways move to the taught position')
+    else:
+        plan_approach(m, st, gap)                              # stops here if the taught approach is blocked
     m = align_lateral(m, st['side'], st['end_y'], dry)
     m = align_heading(m, dry)
     fwd = m['dist'] - FRONT - gap
+    if '--lineup' in sys.argv:
+        # lined up on the approach line, not driven in: e.g. to run "accept NAME" here
+        log('STAGE-ONLY: lined up in front of %s, %.3f m before the final pose (not driven in)' % (name, fwd))
+        if not dry:
+            setmode(0)
+        raise SystemExit(0)
     log('forward %.3f m (target gap %.3f)' % (fwd, gap))
     if fwd < 0 or fwd > MAX_FWD:
         raise SystemExit('ABORT: forward %.3f out of range' % fwd)

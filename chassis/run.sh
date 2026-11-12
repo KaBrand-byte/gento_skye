@@ -20,6 +20,7 @@
 #   run.sh accept NAME [clear]  NO MOTION: robot lined up on NAME's approach line (>= 0.25 m before it): record what the model
 #                           touches there as verified-clear (on site); docking ignores exactly those points
 #   run.sh restage NAME [BACK]  NO MOTION: recompute the staging spot of a taught station from the current scan
+#   run.sh lineup NAME      like goto, but stop lined up in front of NAME before driving in (e.g. for accept)  (MOVES)
 #   run.sh undock [MIN]     reverse straight out along the last docking approach (>= MIN m, 0.30)    (MOVES)
 #   run.sh selfscan         measure arms/tray with the lidar and store them (no motion)
 #   run.sh check NAME       what docking at NAME would do from here (no motion)
@@ -52,6 +53,8 @@ case "$1" in
             timeout 90 python3 dock.py accept "$2" ${3:+"$3"} ;;
   restage)  [ -z "$2" ] && { echo "usage: restage NAME [BACK]"; exit 1; }
             timeout 200 python3 dock.py restage "$2" $(num "$3" 0.5) ;;
+  lineup)   [ -z "$2" ] && { echo "usage: lineup NAME"; exit 1; }
+            start "$2" timeout 500 python3 dock.py dock "$2" --leave --closest --lineup ;;
   undock)   start undock timeout 90 python3 dock.py undock $(num "$2" '') ;;
   teach-pose) [ -z "$2" ] && { echo "usage: teach-pose NAME [BACK] [left|right]"; exit 1; }
             timeout 90 python3 dock.py teach-pose "$2" $(num "$3" 0.5) ${4:+"$4"} ;;
@@ -82,5 +85,5 @@ P
   follow)   sleep 0.5; tail -n +$(( $(wc -l < "$LOG") - 2 )) -f "$LOG" & T=$!
             while running; do sleep 0.5; done; sleep 0.5; kill $T 2>/dev/null; echo; bash "$0" job-status ;;
   relocate) timeout 240 python3 locmatch.py global --apply; timeout 60 python3 locmatch.py check | tail -n 1 ;;
-  *)        sed -n 2,28p "$0" ;;
+  *)        sed -n 2,29p "$0" ;;
 esac

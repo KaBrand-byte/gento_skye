@@ -18,6 +18,7 @@
 #   accept NAME [clear]   NO MOTION: robot lined up in front of NAME: structure the model touches there was
 #                         verified clear on site -> docking ignores exactly those points
 #   restage NAME          NO MOTION: recompute the staging spot of a taught station from here (robot near it)
+#   lineup NAME           DRIVE: like goto, but stop lined up in front of NAME before driving in  (asks y/n)
 #   undock                DRIVE: reverse straight out along the last docking approach              (asks y/n)
 #   job        job status JSON (what the skye_task adapter reads)
 #   task [args]    START THE FULL TASK on the Orin (arms + navigation, in tmux)       (MOVES, asks y/n)
@@ -59,6 +60,7 @@ switch ($Cmd) {
     'teach-staging' { ssh chassis "$remote teach-staging $Arg $($Rest -join ' ')" }
     'accept'   { ssh chassis "$remote accept $Arg $($Rest -join ' ')" }
     'restage'  { ssh chassis "$remote restage $Arg $($Rest -join ' ')" }
+    'lineup'   { Confirm-Motion "line up in front of station $Arg (not driving in)"; ssh -t chassis "$remote lineup $Arg && $remote follow" }
     'undock'   { Confirm-Motion "reverse straight out of the last docking"; ssh -t chassis "$remote undock && $remote follow" }
     'teach'    { Confirm-Motion "teach station $Arg at the current lateral position (turns a little)"; ssh chassis "$remote teach $Arg" }
     'job'      { ssh chassis "$remote job-status" }
@@ -90,5 +92,5 @@ switch ($Cmd) {
         }
         Start-Process 'chrome.exe' 'http://localhost:8080'
     }
-    default    { Get-Content $PSCommandPath -TotalCount 36 | Select-Object -Skip 1 }
+    default    { Get-Content $PSCommandPath -TotalCount 37 | Select-Object -Skip 1 }
 }
