@@ -295,7 +295,8 @@ def leave_move(p, cfg, max_d=0.6, phase='carry'):
         return (0.0, 0.0)
     p = remove_self(p, cfg, phase); m = cfg['margin']; k = math.sqrt(0.5); best = None
     R = _point_radius(p, cfg, phase, m)
-    for ux, uy in ((-1.0, 0.0), (0.0, -1.0), (0.0, 1.0), (-k, -k), (-k, k)):
+    # pure moves only: the chassis does not drive a combined forward + sideways goal in a straight line
+    for ux, uy in ((-1.0, 0.0), (0.0, -1.0), (0.0, 1.0)):
         u = np.array([ux, uy])
         need = _turn_clear_distance(p[R > 0, :2], R[R > 0], u, max_d)
         if need is None:

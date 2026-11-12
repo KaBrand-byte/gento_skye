@@ -218,6 +218,11 @@ def unpark(force=False):
 
 
 def rel(x=0.0, yaw=0.0, rear_check=False, y=0.0):
+    # SAFETY: the vendor MoveRelative does NOT move a combined forward + sideways goal in a straight line
+    # (2026-11-12: x 0.75 / y 1.00 ended turned 16 deg and 0.38 m off, and hit the table next to the belt).
+    # Every collision check here assumes straight pure moves: refuse combined goals.
+    if abs(x) > 0.001 and abs(y) > 0.001:
+        raise SystemExit('ABORT: combined forward + sideways move (x %.3f, y %.3f) refused - split it' % (x, y))
     if S[0].is_soft_auto:
         setmode(1)
     unpark()
@@ -337,6 +342,23 @@ def lat_error(m, st, gap):
 
 
 STAGE2 = 0.30          # m: the last part of a long approach is driven after a fresh measurement
+SIDE_MIN = 0.025       # m: the chassis does not execute sideways moves much below ~2 cm on their own
+
+
+def sideways_small(dy, st, fwd):
+    """Pure sideways correction, also below the chassis' ~2 cm dead band: out by dy + 4 cm, back by 4 cm (both
+    moves are big enough to be executed).  Both checked against the live cloud (incl. accepted structure)."""
+    if abs(dy) < 0.008:
+        return
+    steps = [dy] if abs(dy) >= SIDE_MIN else [dy + math.copysign(0.04, dy), -math.copysign(0.04, dy)]
+    p = accepted_filter(RM.remove_self(cloud(), CFG), st, fwd, dy)
+    off = 0.0
+    for s_ in steps:
+        need_clear(RM.sweep_hits(p - np.array([0.0, off, 0.0]), CFG, 0.0, s_), 'sideways correction')
+        off += s_
+    log('sideways correction %.3f m (%s)' % (dy, ' then '.join('%.3f' % s_ for s_ in steps)))
+    for s_ in steps:
+        rel(0.0, 0.0, y=s_)
 
 
 def measure_station(st, gap, expect_dist):
@@ -562,7 +584,7 @@ def translate(dx, dy):
     """Straight translation without turning by (dx, dy) in the robot frame: one diagonal move, or sideways then
     forward, or forward then sideways - the first whose swept volume is clear in the live cloud."""
     p = cloud()
-    paths = [[(dx, dy)], [(0.0, dy), (dx, 0.0)], [(dx, 0.0), (0.0, dy)]]
+    paths = [[(0.0, dy), (dx, 0.0)], [(dx, 0.0), (0.0, dy)]]     # pure moves only (see rel)
     for path in paths:
         q, ok = p, True
         for mx, my in path:
@@ -1122,10 +1144,13 @@ elif cmd in ('dock', 'redock'):
             raise SystemExit('ABORT: forward %.3f out of range' % fwd)
         if fwd > STAGE2 + 0.15:
             first = fwd - STAGE2
-            need_clear(RM.sweep_hits(accepted_filter(RM.remove_self(cloud(), CFG), st, fwd, dy), CFG, first, dy),
-                       'diagonal approach')
-            log('diagonal approach: forward %.3f m, sideways %.3f m' % (first, dy))
-            rel(first + FWD_SHORT, 0.0, y=dy); total += first + FWD_SHORT
+            p = accepted_filter(RM.remove_self(cloud(), CFG), st, fwd, dy)
+            need_clear(RM.sweep_hits(p, CFG, 0.0, dy), 'sideways move to the station line')
+            need_clear(RM.sweep_hits(p - np.array([0.0, dy, 0.0]), CFG, first, 0.0), 'straight approach')
+            log('approach: sideways %.3f m, then forward %.3f m' % (dy, first))
+            if abs(dy) > 0.005:
+                rel(0.0, 0.0, y=dy)
+            rel(first + FWD_SHORT, 0.0); total += first + FWD_SHORT
             m = measure_station(st, gap, m['dist'] - first)
             log('  stage 2 measure', pub(m))
             plan_approach(m, st, gap)
@@ -1135,9 +1160,10 @@ elif cmd in ('dock', 'redock'):
             rel(0.0, ra)
             m = measure_station(st, gap, m['dist']); rx, ry, ra = ref_offset(name)
         fwd = m['dist'] - FRONT - gap
-        need_clear(RM.sweep_hits(accepted_filter(RM.remove_self(cloud(), CFG), st, fwd, ry), CFG, fwd, ry), 'last stage')
-        log('last stage: forward %.3f m, sideways %.3f m' % (fwd, ry))
-        rel(fwd + FWD_SHORT_LAST, 0.0, y=ry); total += fwd + FWD_SHORT_LAST
+        sideways_small(ry, st, fwd)
+        need_clear(RM.sweep_hits(accepted_filter(RM.remove_self(cloud(), CFG), st, fwd, 0.0), CFG, fwd, 0.0), 'last stage')
+        log('last stage: forward %.3f m' % fwd)
+        rel(fwd + FWD_SHORT_LAST, 0.0); total += fwd + FWD_SHORT_LAST
         YLIM[0] = 2.5; f = measure(near=True)
         res = dict(name=name, gap_target=gap, gap=f['gap'] if f else None, ang_deg=f['ang_deg'] if f else None, fwd=round(fwd, 4))
         try:
