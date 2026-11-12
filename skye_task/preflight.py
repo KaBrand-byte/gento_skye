@@ -27,7 +27,7 @@ def check_current_plan(sdk, config, report, on_event=lambda name, detail: None):
         segments = (
             ("forward", [[config.forward_mm, 0, 0]] * 2, config.forward),
             ("down", [[0, 0, -config.down_mm]] * 2, config.down),
-            ("exit", [[0, config.left_exit_mm, 0], [0, -config.right_exit_mm, 0]], config.exit),
+            ("up", [[0, 0, config.up_mm]] * 2, config.up),
         )
         predicted = deepcopy(feedback)
         for name, deltas, motion in segments:
@@ -51,19 +51,23 @@ def check_current_plan(sdk, config, report, on_event=lambda name, detail: None):
                 predicted.rt["arms"][i]["fb"]["fb_pos"] = trajectory.endpoint
             record.update(status="planned", point_counts=[t.count for t in trajectories],
                           endpoint_joints_deg=[t.endpoint for t in trajectories])
-        record = {"name": "return_ready", "status": "planning"}
-        report["segments"].append(record)
-        counts = []
-        for i in range(2):
-            if validator._near(predicted.joints[i], config.ready[i]):
-                counts.append(0)
-                continue
-            trajectory = sdk.plan_joint(i, predicted.joints[i], config.ready[i])
-            if (not validator._near(trajectory.startpoint, predicted.joints[i])
-                    or not validator._near(trajectory.endpoint, config.ready[i])):
-                raise MotionError(f"return_ready: arm{i} 规划端点不匹配")
-            counts.append(trajectory.count)
-        record.update(status="planned", point_counts=counts)
+        for name, targets in (("return_transition", config.transition), ("return_ready", config.ready)):
+            record = {"name": name, "status": "planning", "reference_joints_deg": predicted.joints,
+                      "target_joints_deg": targets}
+            report["segments"].append(record)
+            counts = []
+            for i in range(2):
+                if validator._near(predicted.joints[i], targets[i]):
+                    counts.append(0)
+                    continue
+                trajectory = sdk.plan_joint(i, predicted.joints[i], targets[i])
+                if (not validator._near(trajectory.startpoint, predicted.joints[i])
+                        or not validator._near(trajectory.endpoint, targets[i])):
+                    raise MotionError(f"{name}: arm{i} 规划端点不匹配")
+                counts.append(trajectory.count)
+                predicted.rt["arms"][i]["fb"]["fb_pos"] = trajectory.endpoint
+            record.update(status="planned", point_counts=counts,
+                          endpoint_joints_deg=predicted.joints)
         report["status"] = "planned"
         return True
     except Exception as error:

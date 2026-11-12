@@ -1,1 +1,1 @@
-"""Fixed-base, unloaded dual-arm sequence for Gento Skye SDK 0407."""
+"""Fixed-base dual-arm and gripper task for Gento Skye SDK 0407."""

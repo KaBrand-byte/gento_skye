@@ -30,9 +30,28 @@ class PreflightTests(unittest.TestCase):
         report = {}
         self.assertTrue(check_current_plan(device, Config(), report))
         self.assertEqual(report["status"], "planned")
-        self.assertEqual([r["name"] for r in report["segments"]], ["forward", "down", "exit", "return_ready"])
-        self.assertEqual(device.calls, [("plan_joint", 0), ("plan_joint", 1)])
+        self.assertEqual([r["name"] for r in report["segments"]],
+                         ["forward", "down", "up", "return_transition", "return_ready"])
+        self.assertEqual(device.calls, [("plan_joint", 0), ("plan_joint", 1)] * 2)
+        forward, down, up, transition, ready = report["segments"]
+        self.assertEqual(up["robot_displacements_mm"], [[0, 0, 100], [0, 0, 100]])
+        self.assertEqual(up["arm_base_target_matrices"], down["arm_base_start_matrices"])
+        self.assertEqual(transition["reference_joints_deg"], forward["endpoint_joints_deg"])
+        self.assertEqual(ready["reference_joints_deg"], Config().transition)
+        self.assertEqual(ready["endpoint_joints_deg"], Config().ready)
         device.enter_position.assert_not_called()
+
+    def test_failed_return_transition_does_not_plan_return_ready_or_send_control(self):
+        device = self.device_at_receive()
+        device.plan_joint = MagicMock(side_effect=MotionError("return transition unreachable"))
+        report = {}
+        self.assertFalse(check_current_plan(device, Config(), report))
+        self.assertEqual([r["name"] for r in report["segments"]],
+                         ["forward", "down", "up", "return_transition"])
+        self.assertEqual(report["segments"][-1]["status"], "failed")
+        self.assertEqual(report["error"], "return transition unreachable")
+        self.assertEqual(device.calls, [])
+        device.plan_joint.assert_called_once()
 
     def test_failed_plan_retains_inputs_without_stop_or_upload(self):
         device = self.device_at_receive()

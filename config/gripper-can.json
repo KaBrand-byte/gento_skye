@@ -1,0 +1,25 @@
+{
+  "left": {
+    "interface": "vcan0", "slave_id": 1, "master_id": 17, "close_direction": 1,
+    "open_position_rad": 0.0, "close_position_rad": 0.94
+  },
+  "right": {
+    "interface": "vcan1", "slave_id": 2, "master_id": 18, "close_direction": 1,
+    "open_position_rad": 0.0, "close_position_rad": 0.94
+  },
+  "control_rate_hz": 100,
+  "kp": 3.0,
+  "kd": 0.12,
+  "min_position_rad": 0.0,
+  "max_position_rad": 1.6,
+  "max_step_rad": 0.1,
+  "slew_rate_rad_s": 0.2,
+  "position_tolerance_rad": 0.7,
+  "velocity_tolerance_rad_s": 0.3,
+  "stable_seconds": 0.1,
+  "hold_position_tolerance_rad": 0.7,
+  "hold_error_seconds": 0.5,
+  "feedback_timeout_seconds": 0.5,
+  "startup_timeout_seconds": 3.0,
+  "motion_timeout_seconds": 15.0
+}

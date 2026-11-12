@@ -165,7 +165,7 @@ class Device:
 class SequenceTests(unittest.TestCase):
     def setUp(self):
         self.config = replace(Config(), stable_seconds=.04, start_timeout_seconds=.15,
-                              execution_timeout_seconds=.5, poll_seconds=.02)
+                              execution_timeout_seconds=.5, poll_seconds=.02, gripper_enabled=False)
         self.clock = Clock()
         self.device = Device(self.config)
         self.sequence = Sequence(self.device, self.config, clock=self.clock, wait=self.clock.wait)
@@ -184,11 +184,11 @@ class SequenceTests(unittest.TestCase):
         self.assertEqual(self.device.linear_deltas, [
             [[100, 0, 0], [100, 0, 0]],
             [[0, 100, 0], [0, -100, 0]],
-            [[0, 0, 100], [0, 0, 100]],
+            [[0, -100, 0], [0, 100, 0]],
         ])
         completed = [s["name"] for s in result.steps if s["status"] == "completed"]
-        self.assertEqual(completed, ["initialized", "ready", "ready_lift", "receive",
-                                     "receive_lift", "forward", "down", "exit", "return_ready",
+        self.assertEqual(completed, ["initialized", "ready", "ready_lift", "transition", "receive",
+                                     "receive_lift", "forward", "down", "up", "return_transition", "return_ready",
                                      "return_ready_lift", "finished"])
         self.assertEqual([c for c in self.device.calls if c[0] == "move_lift"],
                          [("move_lift", 500), ("move_lift", 450), ("move_lift", 500)])
@@ -198,6 +198,91 @@ class SequenceTests(unittest.TestCase):
                 self.assertEqual(self.device.calls[i-2:i], [("upload", 0), ("upload", 1)])
         self.assertNotIn(("stop", 3), self.device.calls)
         json.dumps(result.to_dict(), allow_nan=False)
+
+    def test_transition_is_used_on_outbound_and_return_paths_at_fixed_lift_heights(self):
+        moves = []
+        original_run = self.device.run
+
+        def capture():
+            moves.append(([list(self.device.uploads[arm].endpoint) for arm in range(2)],
+                          self.device.rt["lift"]["fb_pos"][0]))
+            original_run()
+
+        self.device.run = capture
+        self.sequence.prepare()
+        self.assertEqual(moves, [(self.config.ready, 500), (self.config.transition, 500),
+                                 (self.config.receive, 500)])
+        self.assertEqual(self.device.rt["lift"]["fb_pos"][0], 450)
+        self.sequence.start()
+        # Up reverses down; both return poses are reached before lifting the column.
+        self.assertEqual(len(moves), 8)
+        self.assertEqual(moves[3][0], moves[5][0])
+        self.assertTrue(all(height == 450 for _, height in moves[3:]))
+        self.assertEqual(moves[-2:], [(self.config.transition, 450), (self.config.ready, 450)])
+        self.assertEqual(sum(targets == self.config.transition for targets, _ in moves), 2)
+        self.assertEqual(self.device.rt["lift"]["fb_pos"][0], 500)
+
+    def test_up_must_finish_before_any_return_joint_motion(self):
+        self.sequence.prepare()
+
+        def stall(name, detail):
+            if name == "up" and detail["status"] == "started":
+                self.device.never_finish = True
+
+        self.sequence.on_event = stall
+        with self.assertRaisesRegex(MotionError, "up 执行超时"):
+            self.sequence.start()
+        names = [step["name"] for step in self.sequence.result.steps]
+        self.assertNotIn("return_transition", names)
+        self.assertNotIn("return_ready", names)
+        self.assertEqual(self.device.calls[-1], ("stop", 3))
+        self.assertEqual(self.device.rt["lift"]["fb_pos"][0], 450)
+
+    def test_return_transition_must_finish_before_return_ready(self):
+        self.sequence.prepare()
+
+        def stall(name, detail):
+            if name == "return_transition" and detail["status"] == "started":
+                self.device.never_finish = True
+
+        self.sequence.on_event = stall
+        with self.assertRaisesRegex(MotionError, "return_transition 执行超时"):
+            self.sequence.start()
+        names = [step["name"] for step in self.sequence.result.steps]
+        self.assertNotIn("return_ready", names)
+        self.assertNotIn("return_ready_lift", names)
+        self.assertEqual(self.device.calls[-1], ("stop", 3))
+        self.assertEqual(self.device.rt["lift"]["fb_pos"][0], 450)
+
+    def test_transition_must_finish_before_receive_or_lift_descent(self):
+        def stall(name, detail):
+            if name == "transition" and detail["status"] == "started":
+                self.device.never_finish = True
+
+        self.sequence.on_event = stall
+        with self.assertRaisesRegex(MotionError, "transition 执行超时"):
+            self.sequence.prepare()
+        self.assertFalse(self.sequence.prepared)
+        self.assertEqual(self.sequence.result.status, "failed")
+        self.assertEqual(self.device.calls.count(("run", 3)), 2)
+        self.assertNotIn("receive", [step["name"] for step in self.sequence.result.steps])
+        self.assertNotIn(("move_lift", 450), self.device.calls)
+        self.assertEqual(self.device.calls[-1], ("stop", 3))
+
+    def test_cancellation_at_transition_stops_before_receive(self):
+        def cancel(name, detail):
+            if name == "transition" and detail["status"] == "started":
+                self.sequence.request_stop()
+
+        self.sequence.on_event = cancel
+        with self.assertRaises(Stopped):
+            self.sequence.prepare()
+        self.assertFalse(self.sequence.prepared)
+        self.assertEqual(self.sequence.result.status, "stopped")
+        self.assertEqual(self.device.calls.count(("run", 3)), 2)
+        self.assertNotIn("receive", [step["name"] for step in self.sequence.result.steps])
+        self.assertNotIn(("move_lift", 450), self.device.calls)
+        self.assertEqual(self.device.calls[-1], ("stop", 3))
 
     def test_consecutive_runs_from_final_ready_pose_upload_valid_hold_trajectories(self):
         self.sequence.prepare()
@@ -441,7 +526,7 @@ class SequenceTests(unittest.TestCase):
     def test_stationary_arm_participates_in_dual_mask(self):
         self.device.rt["arms"][0]["fb"]["fb_pos"] = list(self.config.ready[0])
         self.sequence.prepare()
-        self.assertEqual(self.device.calls.count(("run", 3)), 2)
+        self.assertEqual(self.device.calls.count(("run", 3)), 3)
         ready_start = next(s for s in self.sequence.result.steps
                            if s["name"] == "ready" and s["status"] == "started")
         self.assertEqual(ready_start["point_counts"][0], 5)
@@ -489,7 +574,9 @@ class GeometryAndConfigTests(unittest.TestCase):
         self.assertIsNone(gripper.is_placed())
 
     def test_default_and_partial_config(self):
-        self.assertEqual(load_config("config/default.json"), Config())
+        self.assertEqual(load_config(), Config())
+        configured = json.loads(Path("config/default.json").read_text(encoding="utf-8"))
+        self.assertEqual(load_config("config/default.json").receive, configured["receive"])
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / "config.json"
             path.write_text('{"forward": {"velocity_mm_s": 30}}')
@@ -504,8 +591,13 @@ class GeometryAndConfigTests(unittest.TestCase):
             {"joint": {"frequency_hz": 100}}, {"controller_ip": "example.com"},
             {"execution_timeout_seconds": .5}, {"mode_timeout_ms": 2.5},
             {"unknown": 1}, {"forward": {"frequency_hz": 50.5}},
-            {"left_exit_mm": True}, {"forward_mm": "150"},
+            {"up_mm": True}, {"up_mm": 0}, {"up": {"frequency_hz": 100}},
+            {"forward_mm": "150"},
             {"ready_lift": [500, 0]}, {"receive_lift": [float("nan")]},
+            {"transition": []}, {"transition": [[0] * 7]},
+            {"transition": [[0] * 6, [0] * 7]},
+            {"transition": [[float("nan")] * 7, [0] * 7]},
+            {"gripper_enabled": 1}, {"gripper_enabled": "true"},
         ]
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / "config.json"
