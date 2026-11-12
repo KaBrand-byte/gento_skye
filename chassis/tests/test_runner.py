@@ -114,8 +114,14 @@ class RunnerTests(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
-    def run_trial(self, fail_on=None, extra=()):
-        with mock.patch.object(runner, "GentoSDK", side_effect=lambda config: Device(config)), \
+    def run_trial(self, fail_on=None, extra=(), arms=None):
+        def device(config):
+            d = Device(config)
+            d.close = lambda: None                                           # the real GentoSDK has close()
+            for i, arm in enumerate(d.rt["arms"]):
+                arm["fb"]["fb_pos"] = list((arms or config.ready)[i])
+            return d
+        with mock.patch.object(runner, "GentoSDK", side_effect=device), \
              mock.patch.object(runner, "GentoNavigation", side_effect=lambda **kw: FakeNav(fail_on=fail_on, **kw)), \
              mock.patch.object(runner, "wait_for_start", lambda seq: None):
             code = runner.main(["--config", str(self.cfg), "--result", str(self.result), "--poll", "0.01",
@@ -146,6 +152,13 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(events, [("grip", "open"), ("start", "T"), ("grip", "close"), ("start", "D"),
                                   ("grip", "close"), ("grip", "open"), ("start", "undock"),
                                   ("grip", "open"), ("start", "T")])
+
+    def test_refuses_to_start_with_the_arms_at_the_receive_pose(self):
+        from skye_task.config import load_config
+        receive = load_config(self.cfg).receive
+        code, report = self.run_trial(arms=receive)
+        self.assertEqual(code, 1)
+        self.assertNotIn(("start", "T"), FakeNav.log)                     # nothing moved
 
     def test_no_return(self):
         code, report = self.run_trial(extra=["--no-return"])

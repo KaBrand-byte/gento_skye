@@ -50,6 +50,24 @@ class Trial:
         self.gripper = None
         self._sdk = None
 
+    @staticmethod
+    def check_arm_start(config):
+        """His prepare() first moves the arms STRAIGHT to the ready pose.  From the receive side that path made the
+        two arms collide (2026-11-12, e-stop); his own return path goes receive -> transition -> ready.  Only start
+        when the arms are at the ready or transition pose (5 deg), otherwise stop before anything moves."""
+        sdk = GentoSDK(config)
+        try:
+            sdk.connect()
+            joints = sdk.read().joints
+        finally:
+            sdk.close()
+
+        def near(pose):
+            return all(abs(a - b) <= 5.0 for arm, target in zip(joints, pose) for a, b in zip(arm, target))
+        if not (near(config.ready) or near(config.transition)):
+            raise MotionError("双臂不在准备位或过渡位，prepare() 会直接回准备位（曾导致双臂相撞）。请先经过渡位把双臂移回准备位。"
+                              f"当前关节: {[[round(v, 1) for v in arm] for arm in joints]}")
+
     def make_sequence(self, sdk, config, label=""):
         """His Sequence with the grippers driven the same way skye_task's own `run` does."""
         self.gripper = None
@@ -157,6 +175,7 @@ class Trial:
         config = load_config(a.config)
         gaps = {k: v for k, v in ((a.start, a.start_gap), (a.place, a.place_gap)) if v is not None}
         self.nav = GentoNavigation(transport=a.transport, ssh_target=a.ssh_target, gaps=gaps)
+        self.check_arm_start(config)                       # before any motion
         sdk = GentoSDK(config)
         self.sequence = self.make_sequence(sdk, config)
         result = self.sequence.result
