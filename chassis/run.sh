@@ -17,6 +17,8 @@
 #                           lateral position relative to the face, and a staging pose BACK m (0.5) behind it
 #   run.sh teach-staging NAME [map]  NO MOTION: robot at a safe point (room to turn) near NAME: record it as NAME's
 #                           staging point; "map": dock NAME by map position (turn here, translate straight to it)
+#   run.sh accept NAME [clear]  NO MOTION: robot lined up on NAME's approach line: record the structure the model
+#                           touches there as verified-clear (on site); docking ignores exactly those points
 #   run.sh restage NAME [BACK]  NO MOTION: recompute the staging spot of a taught station from the current scan
 #   run.sh undock [MIN]     reverse straight out along the last docking approach (>= MIN m, 0.30)    (MOVES)
 #   run.sh selfscan         measure arms/tray with the lidar and store them (no motion)
@@ -46,6 +48,8 @@ case "$1" in
             start "$2" timeout 500 python3 dock.py dock "$2" $(num "$3" '') --leave $extra ;;
   teach-staging) [ -z "$2" ] && { echo "usage: teach-staging NAME [map]"; exit 1; }
             timeout 90 python3 dock.py teach-staging "$2" ${3:+"$3"} ;;
+  accept)   [ -z "$2" ] && { echo "usage: accept NAME [clear]"; exit 1; }
+            timeout 90 python3 dock.py accept "$2" ${3:+"$3"} ;;
   restage)  [ -z "$2" ] && { echo "usage: restage NAME [BACK]"; exit 1; }
             timeout 200 python3 dock.py restage "$2" $(num "$3" 0.5) ;;
   undock)   start undock timeout 90 python3 dock.py undock $(num "$2" '') ;;
@@ -78,5 +82,5 @@ P
   follow)   sleep 0.5; tail -n +$(( $(wc -l < "$LOG") - 2 )) -f "$LOG" & T=$!
             while running; do sleep 0.5; done; sleep 0.5; kill $T 2>/dev/null; echo; bash "$0" job-status ;;
   relocate) timeout 240 python3 locmatch.py global --apply; timeout 60 python3 locmatch.py check | tail -n 1 ;;
-  *)        sed -n 2,26p "$0" ;;
+  *)        sed -n 2,28p "$0" ;;
 esac

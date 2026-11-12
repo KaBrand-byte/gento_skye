@@ -316,6 +316,52 @@ def align_lateral(m, side, target, dry=False):
     return m
 
 
+ACC_VOX = 0.02     # accepted-obstacle voxels (m); a live point within one voxel of a recorded one is ignored
+
+
+def _vox_hash(k):
+    k = k.astype(np.int64) + 4096
+    return (k[:, 0] << 26) | (k[:, 1] << 13) | k[:, 2]
+
+
+def accepted_filter(p, st, fwd, dy=0.0):
+    """Drop the points that were recorded at this station with `accept` (static structure next to the final
+    pose that the conservative arm model touches but the real arms do not - verified on site).  p: robot frame,
+    the final pose is (fwd, dy) ahead of the robot."""
+    acc = st.get('accepted')
+    if not acc or not len(p):
+        return p
+    a = np.array(acc, dtype=np.int64); lo, hi = a.min(0) - 1, a.max(0) + 1
+    k = np.floor((p - np.array([fwd, dy, 0.0])) / ACC_VOX).astype(np.int64)
+    near = np.all((k >= lo) & (k <= hi), axis=1)
+    if not near.any():
+        return p
+    known = _vox_hash(a); kn = k[near]; hit = np.zeros(len(kn), bool)
+    for d in np.array(np.meshgrid([-1, 0, 1], [-1, 0, 1], [-1, 0, 1])).T.reshape(-1, 3):
+        hit |= np.isin(_vox_hash(kn + d), known)
+    drop = np.zeros(len(p), bool); drop[np.where(near)[0][hit]] = True
+    return p[~drop]
+
+
+def model_hits_mask(p, fwd, sz, place):
+    """Points (own points already removed, robot frame) that the robot model touches on the straight approach
+    of `fwd` m and - place stations - at the place spot / during the place motion."""
+    ms, mg = CFG.get('margin_straight', 0.03), CFG['margin']; hit = np.zeros(len(p), bool)
+    for _, b in RM.boxes(CFG):
+        hit |= RM._inside(p, RM._swept(b, fwd, 0.0), ms)
+    if place and sz is not None:
+        q = p - np.array([fwd, 0.0, 0.0]); t = RM.tray_box(CFG); pm = CFG['place_motion']
+        hit |= ((q[:, 0] > t[0] - mg) & (q[:, 0] < t[1] + mg) & (q[:, 1] > t[2] - mg) & (q[:, 1] < t[3] + mg)
+                & (q[:, 2] > sz + 0.02) & (q[:, 2] < t[4]))
+        for name, b in RM.boxes(CFG):
+            if name in ('arms', 'tray'):
+                env = [b[0], b[1] + pm['forward'], b[2] - pm['side'], b[3] + pm['side'], b[4] - pm['down'], b[5]]
+                floor = max(env[4], sz + 0.02)
+                hit |= ((q[:, 0] > env[0] - ms) & (q[:, 0] < env[1] + ms) & (q[:, 1] > env[2] - ms)
+                        & (q[:, 1] < env[3] + ms) & (q[:, 2] > floor) & (q[:, 2] < env[5] + ms))
+    return hit
+
+
 def plan_approach(m, st, gap):
     """Check the final approach to the TAUGHT pose (the arm motion is hard-coded, so the base never picks
     another spot): sideways move to the taught lateral position, straight forward to the taught gap, and -
@@ -323,6 +369,7 @@ def plan_approach(m, st, gap):
     p = RM.remove_self(cloud(), CFG)                          # own points out BEFORE the cloud is shifted below
     dy = end_y(m, st['side'], st['end_y']) - st['end_y']          # +: robot must move left
     fwd = m['dist'] - FRONT - gap; sz = RM.surface_height(p, m['dist'])
+    p = accepted_filter(p, st, fwd, dy)
     log('plan: sideways %.3f m, forward %.3f m, surface top %s m' % (dy, fwd, None if sz is None else round(sz, 3)))
     need_clear(RM.sweep_hits(p, CFG, 0.0, dy), 'sideways move to the taught position')
     need_clear(RM.sweep_hits(p - np.array([0.0, dy, 0.0]), CFG, fwd, 0.0), 'straight approach')
@@ -674,6 +721,38 @@ elif cmd == 'teach-staging':
     json.dump(st, open(ST_FILE, 'w'), indent=1)
     log('safe point of %s: (%.3f, %.3f); the station is %.2f m away; mode %s' % (name, x, y, math.hypot(dx, dy), s0.get('mode', 'face')))
     log('taught', name, json.dumps(s0))
+elif cmd == 'accept':
+    # accept NAME [clear] : NO MOTION.  The robot is lined up on station NAME's approach line (e.g. where a goto
+    # stopped before driving in) or stands at its final pose.  Records the lidar points that the (conservative)
+    # robot model touches on the rest of the approach and - place stations - in the place motion, as accepted
+    # static structure: verified ON SITE that the real arms clear it.  Docking at NAME then ignores exactly
+    # those points (+- one 2 cm voxel); anything else (a hand, an item, something moved) still stops it.
+    name = args[0]; st = load_st(); s0 = st[name]
+    if 'clear' in args[1:]:
+        s0.pop('accepted', None); json.dump(st, open(ST_FILE, 'w'), indent=1); log('accepted points of', name, 'cleared')
+        raise SystemExit(0)
+    ZB[0], ZB[1] = s0['z']; YLIM[0] = 2.5; YAW_OFF[0] = math.radians(float(s0.get('yaw_offset', 0.0)))
+    m = measure() or measure(near=True)
+    if not m:
+        raise SystemExit('ABORT: no face found ahead')
+    target = s0['end_y'] - float(s0.get('lat_offset', 0.0))
+    dy = end_y(m, s0['side'], target) - target; e = m['err'] + YAW_OFF[0]
+    fwd = m['dist'] - FRONT - s0['gap']
+    log('face', pub(m), '| sideways %.3f m, heading %.2f deg, forward %.3f m to the final pose' % (dy, math.degrees(e), fwd))
+    if abs(dy) > 0.03 or abs(e) > math.radians(1.5) or not -0.02 <= fwd <= MAX_FWD:
+        raise SystemExit('ABORT: not lined up on the approach line of %s - run goto (it lines up before driving in)' % name)
+    p = RM.remove_self(cloud(), CFG); sz = RM.surface_height(p, m['dist'])
+    p = p - np.array([0.0, dy, 0.0])
+    q = p[model_hits_mask(p, max(fwd, 0.0), sz, s0.get('place'))] - np.array([max(fwd, 0.0), 0.0, 0.0])
+    if not len(q):
+        s0.pop('accepted', None); json.dump(st, open(ST_FILE, 'w'), indent=1)
+        log('nothing to accept: the model is clear at', name); raise SystemExit(0)
+    vox = np.unique(np.floor(q / ACC_VOX).astype(int), axis=0)
+    s0['accepted'] = vox.tolist(); json.dump(st, open(ST_FILE, 'w'), indent=1)
+    log('accepted at %s: %d points in %d voxels, relative to the final pose x %.2f..%.2f, y %.2f..%.2f, z %.2f..%.2f'
+        % (name, len(q), len(vox), q[:, 0].min(), q[:, 0].max(), q[:, 1].min(), q[:, 1].max(), q[:, 2].min(), q[:, 2].max()))
+    if len(q) > 3000:
+        log('WARNING: that is a lot - make sure no person or loose item was in front of the robot')
 elif cmd == 'restage':
     # restage NAME [BACK] : NO MOTION.  Recompute the staging spot of a station taught with teach-pose, from
     # the current scan (robot anywhere near the station, localisation good), e.g. after the robot model changed.
@@ -796,6 +875,7 @@ elif cmd in ('dock', 'redock'):
         pw = RM.remove_self(cloud(), CFG); dy = end_y(m, st['side'], st['end_y']) - st['end_y']
         need_clear(RM.sweep_hits(pw, CFG, 0.0, dy), 'sideways move to the taught position')
         f0 = m['dist'] - FRONT - gap
+        pw = accepted_filter(pw, st, f0, dy)
         ok = RM.max_forward(pw - np.array([0.0, dy, 0.0]), CFG, max(f0, 0.0))
         if ok is None:
             raise SystemExit('ABORT: already touching something ahead after the sideways move')
@@ -812,7 +892,7 @@ elif cmd in ('dock', 'redock'):
         raise SystemExit('ABORT: forward %.3f out of range' % fwd)
     if '--closest' in sys.argv:
         # re-evaluate with the fresh cloud after the sideways/heading corrections; back off if needed
-        ok = RM.max_forward(RM.remove_self(cloud(), CFG), CFG, max(fwd, 0.0))
+        ok = RM.max_forward(accepted_filter(RM.remove_self(cloud(), CFG), st, fwd), CFG, max(fwd, 0.0))
         if ok is None:
             raise SystemExit('ABORT: already touching something ahead after aligning')
         if ok < fwd - 0.002:
