@@ -90,8 +90,22 @@ def need_clear(h, what):
 def move_to_turn_spot(max_d=0.30):
     """If turning here would hit something (chassis, torso, arms or tray), make the shortest collision-free
     straight move (back / sideways / diagonal-back) after which turning is clear.  Re-checks after moving."""
-    for _ in range(2):
+    for _ in range(3):
         p = cloud(); mv = RM.leave_move(p, CFG, max_d)      # exact shortest move, computed in one pass
+        if mv is None and max_d >= 0.6:
+            # e.g. docked at a station with something beside the approach: no single straight move reaches a
+            # turning spot, but reversing straight out first (the way the robot came in) and then one more
+            # straight move does
+            for back in (0.3, 0.45, 0.6, 0.75, 0.9):
+                if RM.sweep_hits(p, CFG, -back, 0.0):
+                    break
+                if RM.leave_move(p + np.array([back, 0.0, 0.0]), CFG, max_d) is not None:
+                    log('no single move reaches a turning spot: reverse straight %.2f m first' % back)
+                    rel(-back, 0.0, rear_check=True)
+                    mv = 'moved'
+                    break
+            if mv == 'moved':
+                continue
         if mv is None:
             raise SystemExit('ABORT: no clear spot to turn within %.2f m: %s' % (max_d, json.dumps(RM.rotation_hits(p, CFG))))
         if mv == (0.0, 0.0):
@@ -244,7 +258,8 @@ STAGING_TOL = 0.35
 LOC_MIN_MATCH = 0.60   # scan-to-map match below this before navigating = localisation clearly wrong -> stop
 LAT_TOL = 0.010         # the chassis cannot place sideways moves below ~1 cm reliably
 LAT_MAX = 0.08
-LAT_PLAN_MAX = 0.60   # planned sideways shift from staging to the dock line
+STAGING_MARGIN = 0.10  # teach-pose: turning must also be clear this far off the staging spot
+LAT_PLAN_MAX = 0.90   # planned sideways shift from staging to the dock line (staging may be offset to turn)
 
 
 def load_st():
@@ -497,16 +512,34 @@ elif cmd == 'teach-pose':
         h = RM.place_motion_hits(p, CFG, 0.0, sz) if sz is not None else {'what': 'surface not seen'}
         if h:
             notes.append('place motion from here would hit %s' % json.dumps(h))
-    stg = p + np.array([back, 0.0, 0.0])                      # the cloud as seen from the staging pose
-    if RM.rotation_hits(stg, CFG):
-        notes.append('turning at the staging pose is not clear (%s): docking backs off first; a larger BACK '
-                     'avoids that' % json.dumps(RM.rotation_hits(stg, CFG)))
+    # staging: b m behind and s m to the right of the final pose, where the robot + arms + tray can turn in
+    # place, the sideways move back onto the final line and the straight approach are clear.  Nearest such
+    # spot (smallest sideways offset, then smallest distance) from BACK on; else BACK straight behind.
+    def staging_ok(b, s):
+        q = p + np.array([b, s, 0.0])                         # the cloud as seen from that staging spot
+        f = RM.max_forward(p + np.array([b, 0.0, 0.0]), CFG, b)
+        if RM.sweep_hits(q, CFG, 0.0, s) or f is None or f < b - 0.005:
+            return False
+        # turning must stay clear if navigation stops up to STAGING_MARGIN off the spot
+        return not any(RM.rotation_hits(p + np.array([b + db, s + ds, 0.0]), CFG)
+                       for db, ds in ((0, 0), (STAGING_MARGIN, 0), (-STAGING_MARGIN, 0), (0, STAGING_MARGIN), (0, -STAGING_MARGIN)))
+    bs = [b for b in np.arange(back, MAX_FWD + 0.001, 0.05) if m['dist'] + b <= 2.1]
+    ss = sorted(np.arange(-LAT_PLAN_MAX + 0.1, LAT_PLAN_MAX - 0.1 + 0.001, 0.05), key=abs)
+    pick = next(((float(b), float(s)) for s in ss for b in bs if staging_ok(b, s)), None)
+    if pick is None:
+        pick = (back, 0.0)
+        notes.append('no staging spot within %.1f m back / %.1f m sideways where turning is clear (%s): '
+                     'docking will try to back off first' % (MAX_FWD, LAT_PLAN_MAX - 0.1,
+                                                            json.dumps(RM.rotation_hits(p + np.array([back, 0, 0]), CFG))))
+    b, s = pick
+    log('staging spot: %.2f m back, %.2f m to the %s of the final pose (turning clear there)'
+        % (b, abs(s), 'right' if s >= 0 else 'left'))
     st[name] = dict(old, side=side, gap=round(m['gap'], 4), end_y=round(ey, 4),
                     yaw_offset=round(-m['ang_deg'], 2), z=list(ZB),
-                    staging_pose=[round(x - back * math.cos(yaw), 3), round(y - back * math.sin(yaw), 3),
-                                  round(math.degrees(yaw), 2)],
-                    pose=[round(x, 3), round(y, 3), round(math.degrees(yaw), 2)], back=back,
-                    taught=time.strftime('%Y-%m-%d %H:%M:%S'))
+                    staging_pose=[round(x - b * math.cos(yaw) + s * math.sin(yaw), 3),
+                                  round(y - b * math.sin(yaw) - s * math.cos(yaw), 3), round(math.degrees(yaw), 2)],
+                    pose=[round(x, 3), round(y, 3), round(math.degrees(yaw), 2)], back=round(b, 3),
+                    staging_right=round(s, 3), taught=time.strftime('%Y-%m-%d %H:%M:%S'))
     for k in ('untaught', 'lat_offset', 'note', 'staging_xy'):  # fresh teach: no old fine-tunes / references
         st[name].pop(k, None)
     json.dump(st, open(ST_FILE, 'w'), indent=1)
