@@ -17,6 +17,7 @@ sys.path.insert(0, str(ROOT / "tests"))
 sys.path.insert(0, str(ROOT / "chassis" / "client"))
 
 import run_task_with_navigation as runner  # noqa: E402
+runner.LINK_RELEASE_S = 0.0
 from gento_navigation import NavigationError  # noqa: E402
 from test_sequence import Device  # noqa: E402  (skye_task's offline robot double)
 

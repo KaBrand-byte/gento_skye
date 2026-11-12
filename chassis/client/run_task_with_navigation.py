@@ -29,6 +29,7 @@ import sys
 import time
 
 ROOT = Path(__file__).resolve().parents[2]
+LINK_RELEASE_S = 2.0     # the controller refuses a new link (-22) for ~1 s after the previous one was closed
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -61,6 +62,7 @@ class Trial:
             joints = sdk.read().joints
         finally:
             sdk.close()
+            time.sleep(LINK_RELEASE_S)
 
         def near(pose):
             return all(abs(a - b) <= 5.0 for arm, target in zip(joints, pose) for a, b in zip(arm, target))
@@ -112,6 +114,7 @@ class Trial:
                 sdk.close()
             except Exception as error:
                 logging.error("SDK 资源释放失败: %s", error)
+            time.sleep(LINK_RELEASE_S)
 
     def navigate(self, destination, undock=False):
         """Drive to `destination` (or reverse out with undock=True); keep checking the arms; return only after
