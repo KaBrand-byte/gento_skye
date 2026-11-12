@@ -22,6 +22,7 @@
 #   task-stop      Ctrl-C to the task (stops arms + chassis) and software-stop the chassis
 #   task-check     no motion: task config + SDK version on the Orin
 #   relocate   fix the localisation: match the lidar scan to the whole map, apply the pose  (no motion)
+#   (goto / undock / to-start / demo show the job log until it ends; Ctrl+C only stops watching)
 #   stop       software stop: kill job, cancel moves + tasks, soft manual
 #   log        follow the job log (Ctrl+C to leave; the job keeps running)
 #   web        open the chassis web page (starts the tunnel if needed)
@@ -45,12 +46,12 @@ switch ($Cmd) {
     'selfscan' { ssh chassis "$remote selfscan" }
     'check'    { if (-not $Arg) { $Arg = 'D' }; ssh chassis "$remote check $Arg" }
     'demo-dry' { ssh chassis "$remote demo-dry $Arg" }
-    'to-start' { Confirm-Motion "drive to the table (start point T), gap $(if ($Arg) {$Arg} else {'0.45'}) m"; ssh chassis "$remote to-start $Arg"; Write-Host "  follow with: .\gento.ps1 log    stop with: .\gento.ps1 stop" }
-    'demo'     { Confirm-Motion "table -> D1 -> straight towards the conveyor, gap $(if ($Arg) {$Arg} else {'0.25'}) m (stops earlier if blocked)"; ssh chassis "$remote demo $Arg"; Write-Host "  follow with: .\gento.ps1 log    stop with: .\gento.ps1 stop" }
-    'goto'     { Confirm-Motion "dock at station $Arg"; ssh chassis "$remote goto $Arg $($Rest -join ' ')" }
+    'to-start' { Confirm-Motion "drive to the table (start point T), gap $(if ($Arg) {$Arg} else {'0.45'}) m"; ssh -t chassis "$remote to-start $Arg && $remote follow" }
+    'demo'     { Confirm-Motion "table -> D1 -> straight towards the conveyor, gap $(if ($Arg) {$Arg} else {'0.25'}) m (stops earlier if blocked)"; ssh -t chassis "$remote demo $Arg && $remote follow" }
+    'goto'     { Confirm-Motion "dock at station $Arg"; ssh -t chassis "$remote goto $Arg $($Rest -join ' ') && $remote follow" }
     'tune'     { ssh chassis "$remote tune $Arg $($Rest -join ' ')" }
     'teach-pose' { ssh chassis "$remote teach-pose $Arg $($Rest -join ' ')" }
-    'undock'   { Confirm-Motion "reverse straight out of the last docking"; ssh chassis "$remote undock" }
+    'undock'   { Confirm-Motion "reverse straight out of the last docking"; ssh -t chassis "$remote undock && $remote follow" }
     'teach'    { Confirm-Motion "teach station $Arg at the current lateral position (turns a little)"; ssh chassis "$remote teach $Arg" }
     'job'      { ssh chassis "$remote job-status" }
     'task'        { Confirm-Motion "FULL TASK on the Orin: arms to carry pose, drive to T, Enter, drive to D, place, back to T";
@@ -81,5 +82,5 @@ switch ($Cmd) {
         }
         Start-Process 'chrome.exe' 'http://localhost:8080'
     }
-    default    { Get-Content $PSCommandPath -TotalCount 30 | Select-Object -Skip 1 }
+    default    { Get-Content $PSCommandPath -TotalCount 31 | Select-Object -Skip 1 }
 }

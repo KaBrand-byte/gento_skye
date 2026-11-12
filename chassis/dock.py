@@ -526,22 +526,28 @@ elif cmd == 'teach-pose':
     bs = [b for b in np.arange(back, MAX_FWD + 0.001, 0.05) if m['dist'] + b <= 2.1]
     ss = sorted(np.arange(-LAT_PLAN_MAX + 0.1, LAT_PLAN_MAX - 0.1 + 0.001, 0.05), key=abs)
     pick = next(((float(b), float(s)) for s in ss for b in bs if staging_ok(b, s)), None)
-    if pick is None:
-        pick = (back, 0.0)
-        notes.append('no staging spot within %.1f m back / %.1f m sideways where turning is clear (%s): '
-                     'docking will try to back off first' % (MAX_FWD, LAT_PLAN_MAX - 0.1,
-                                                            json.dumps(RM.rotation_hits(p + np.array([back, 0, 0]), CFG))))
-    b, s = pick
-    log('staging spot: %.2f m back, %.2f m to the %s of the final pose (turning clear there)'
-        % (b, abs(s), 'right' if s >= 0 else 'left'))
     st[name] = dict(old, side=side, gap=round(m['gap'], 4), end_y=round(ey, 4),
                     yaw_offset=round(-m['ang_deg'], 2), z=list(ZB),
-                    staging_pose=[round(x - b * math.cos(yaw) + s * math.sin(yaw), 3),
-                                  round(y - b * math.sin(yaw) - s * math.cos(yaw), 3), round(math.degrees(yaw), 2)],
-                    pose=[round(x, 3), round(y, 3), round(math.degrees(yaw), 2)], back=round(b, 3),
-                    staging_right=round(s, 3), taught=time.strftime('%Y-%m-%d %H:%M:%S'))
-    for k in ('untaught', 'lat_offset', 'note', 'staging_xy'):  # fresh teach: no old fine-tunes / references
+                    pose=[round(x, 3), round(y, 3), round(math.degrees(yaw), 2)], taught=time.strftime('%Y-%m-%d %H:%M:%S'))
+    for k in ('untaught', 'lat_offset', 'note', 'staging_pose', 'back', 'staging_right'):  # fresh teach
         st[name].pop(k, None)
+    if pick is not None:
+        # a map pose: the vendor navigation arrives there with an arbitrary heading, the robot turns in place
+        b, s = pick
+        log('staging spot: %.2f m back, %.2f m to the %s of the final pose (turning clear there)'
+            % (b, abs(s), 'right' if s >= 0 else 'left'))
+        st[name].update(staging_pose=[round(x - b * math.cos(yaw) + s * math.sin(yaw), 3),
+                                      round(y - b * math.sin(yaw) - s * math.cos(yaw), 3), round(math.degrees(yaw), 2)],
+                        back=round(b, 3), staging_right=round(s, 3))
+    elif 'staging' in old:
+        # no room to turn in place near the station: keep the vendor station, whose navigation arrives already
+        # facing the right way (only small alignment turns there)
+        notes.append('no spot within %.1f m back / %.1f m sideways where the arms can turn in place (%s): keeping '
+                     'vendor station %s as staging (it arrives facing the face)'
+                     % (MAX_FWD, LAT_PLAN_MAX - 0.1, json.dumps(RM.rotation_hits(p + np.array([back, 0, 0]), CFG)), old['staging']))
+    else:
+        raise SystemExit('ABORT: no staging spot where the arms can turn in place and no vendor station for %s - '
+                         'record a station on the web page first' % name)
     json.dump(st, open(ST_FILE, 'w'), indent=1)
     for t in notes:
         log('NOTE:', t)
@@ -577,7 +583,7 @@ elif cmd in ('dock', 'redock'):
         log(out)
         if ' 0 Succ' not in out:
             raise SystemExit('ABORT: task not created')
-        sxy = st.get('staging_xy') or (st['staging_pose'][:2] if 'staging_pose' in st else None)
+        sxy = st['staging_pose'][:2] if 'staging_pose' in st else st.get('staging_xy')
         if not wait_task(near=sxy):
             raise SystemExit('ABORT: staging not reached in time')
         spin(0.3)
