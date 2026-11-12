@@ -136,12 +136,12 @@ bash ~/gento_skye/chassis/client/orin_task.sh stop             # 软件停止：
 在 Windows 电脑上对应的命令是 `tools/gento.ps1 task | task-attach | task-stop | task-check`。
 
 完整任务的顺序：
-1. 双臂到接盘（运输）姿态，升降 450 mm；
+1. 双臂到接盘（运输）姿态，升降至配置的接盘高度（当前 JSON 为 700 mm）；
 2. （可选）`selfscan` 实测双臂和托盘占位；
 3. 导航到 T；
 4. 按 Enter；
 5. 导航到 D；
-6. 执行前伸、下降、两侧退出、回准备位。
+6. 执行前伸、下降、松爪、双臂同步上移，再依次回过渡位和准备位；距离以配置为准，当前 JSON 的前伸为 100 mm，下降和上移均为 150 mm。
 
 结果写在 `~/gento_skye/runs/with-navigation.json`。
 

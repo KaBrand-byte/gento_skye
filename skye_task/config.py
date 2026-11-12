@@ -33,6 +33,10 @@ class Config:
         [90, -64, -67, -89, -24, -8, 17],
         [-90, -64, 67, -89, 24, -8, -17],
     ])
+    transition: list = field(default_factory=lambda: [
+        [35.269, -31.956, 5.388, -65.174, 30.743, -22.681, -45.954],
+        [-35.269, -31.956, -5.388, -65.174, -30.743, -22.681, 45.954],
+    ])
     receive: list = field(default_factory=lambda: [
         [85, -70, -60, -90, 15, 0, 10],
         [-85, -70, 60, -90, -15, 0, -10],
@@ -44,12 +48,11 @@ class Config:
     receive_lift: list = field(default_factory=lambda: [450])
     forward_mm: float = 100.0
     down_mm: float = 100.0
-    left_exit_mm: float = 100.0
-    right_exit_mm: float = 100.0
+    up_mm: float = 100.0
     joint: JointMotion = field(default_factory=JointMotion)
     forward: LinearMotion = field(default_factory=LinearMotion)
     down: LinearMotion = field(default_factory=LinearMotion)
-    exit: LinearMotion = field(default_factory=LinearMotion)
+    up: LinearMotion = field(default_factory=LinearMotion)
     mode_velocity_percent: float = 10.0
     mode_acceleration_percent: float = 10.0
     mode_timeout_ms: int = 2000
@@ -73,7 +76,7 @@ class Config:
         IPv4Address(self.controller_ip)
         if not self.sdk_root or self.expected_version_prefix != "000407":
             raise ValueError("本实现要求 SDK/控制器版本前缀 000407")
-        for name in ("ready", "receive"):
+        for name in ("ready", "transition", "receive"):
             points = getattr(self, name)
             if not isinstance(points, list) or len(points) != 2:
                 raise ValueError(f"{name} 必须包含左右臂两个点位")
@@ -92,7 +95,7 @@ class Config:
         for name in ("mode_velocity_percent", "mode_acceleration_percent"):
             if getattr(self, name) > 100:
                 raise ValueError(f"{name} 不能大于 100")
-        for name in ("joint", "forward", "down", "exit"):
+        for name in ("joint", "forward", "down", "up"):
             motion = getattr(self, name)
             for key, value in asdict(motion).items():
                 _positive(value, f"{name}.{key}")

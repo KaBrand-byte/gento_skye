@@ -24,7 +24,10 @@ from test_sequence import Clock, Device
 
 class TaskGripperTests(unittest.TestCase):
     def setUp(self):
+        # Keep drift samples independent of user tuning in the runtime JSON.
         self.config = replace(load_gripper_config("config/gripper-can.json"),
+                              position_tolerance_rad=.08, hold_position_tolerance_rad=.15,
+                              hold_error_seconds=.5,
                               stable_seconds=.03, motion_timeout_seconds=1,
                               feedback_timeout_seconds=.3, startup_timeout_seconds=.15)
         self.sdk = MagicMock()
@@ -167,7 +170,7 @@ class IntegratedSequenceTests(unittest.TestCase):
         self.sequence = Sequence(self.device, self.config, gripper=self.gripper,
                                  clock=self.clock, wait=self.clock.wait)
 
-    def test_open_receive_trigger_close_place_open_exit_order_and_waits(self):
+    def test_open_receive_trigger_close_place_open_up_return_order_and_waits(self):
         self.sequence.prepare()
         self.assertEqual(self.gripper.actions, [(GripperTarget.BOTH, GripperAction.OPEN)])
         self.assertEqual(self.sequence.result.handover, "skipped")
@@ -175,9 +178,11 @@ class IntegratedSequenceTests(unittest.TestCase):
         self.assertEqual([action for _, action in self.gripper.actions],
                          [GripperAction.OPEN, GripperAction.CLOSE, GripperAction.OPEN])
         completed = [step["name"] for step in self.sequence.result.steps if step["status"] == "completed"]
-        expected = ["ready_lift", "open_before_receive", "open_before_receive_wait", "receive_lift",
+        expected = ["ready_lift", "open_before_receive", "open_before_receive_wait", "transition",
+                    "receive", "receive_lift",
                     "handover_and_close", "handover_and_close_wait", "handover_wait",
-                    "forward", "down", "release", "release_wait", "exit", "return_ready_lift"]
+                    "forward", "down", "release", "release_wait", "up",
+                    "return_transition", "return_ready", "return_ready_lift"]
         self.assertEqual([step for step in completed if step in expected], expected)
         for name in ("open_before_receive_wait", "handover_and_close_wait", "handover_wait", "release_wait"):
             rows = [step for step in self.sequence.result.steps if step["name"] == name]
@@ -202,12 +207,13 @@ class IntegratedSequenceTests(unittest.TestCase):
         self.assertTrue(self.gripper.frozen)
         self.assertEqual(len(self.gripper.actions), 2)  # No automatic reopening.
 
-    def test_release_failure_prevents_exit_and_return(self):
+    def test_release_failure_prevents_up_and_return(self):
         self.sequence.prepare()
         self.gripper.fail_action = GripperAction.OPEN
         with self.assertRaisesRegex(MotionError, "right gripper"):
             self.sequence.start()
         self.assertEqual(len(self.device.linear_deltas), 2)
+        self.assertNotIn("return_transition", [s["name"] for s in self.sequence.result.steps])
         self.assertNotIn("return_ready", [s["name"] for s in self.sequence.result.steps])
 
     def test_motor_fault_while_arms_move_stops_arms_without_release(self):

@@ -36,7 +36,7 @@ DEFAULT = {
     'margin': 0.05,           # clearance for turning (the arms/tray swing out)
     'margin_straight': 0.03,  # clearance for slow straight moves (lidar accuracy ~1 cm)
     # the (hard-coded) place motion after docking: forward, down, then each hand sideways out (skye_task
-    # forward_mm / down_mm / left_exit_mm / right_exit_mm, in metres)
+    # forward_mm / down_mm / up_mm, in metres)
     'place_motion': {'forward': 0.10, 'down': 0.10, 'side': 0.10},
 }
 

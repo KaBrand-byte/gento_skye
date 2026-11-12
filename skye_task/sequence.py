@@ -117,6 +117,7 @@ class Sequence:
             self._gripper_action("open_before_receive", GripperAction.OPEN)
         else:
             self._record("open_before_receive", status="skipped", reason="配置关闭夹爪，空载验证")
+        self._move_joint("transition", self.config.transition)
         self._move_joint("receive", self.config.receive)
         self._move_lift("receive_lift", self.config.receive_lift[0])
         if self.gripper is None:
@@ -149,8 +150,8 @@ class Sequence:
             self._gripper_action("release", GripperAction.OPEN)
         else:
             self._record("release", status="skipped", reason="配置关闭夹爪，无开合指令或等待")
-        self._move_linear("exit", [[0, self.config.left_exit_mm, 0],
-                                   [0, -self.config.right_exit_mm, 0]], self.config.exit)
+        self._move_linear("up", [[0, 0, self.config.up_mm]] * 2, self.config.up)
+        self._move_joint("return_transition", self.config.transition)
         self._move_joint("return_ready", self.config.ready)
         self._move_lift("return_ready_lift", self.config.ready_lift[0])
         self.result.motion_completed = True
