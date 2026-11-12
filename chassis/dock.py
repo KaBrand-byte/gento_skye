@@ -311,11 +311,25 @@ def _face_lateral(err, dist, ye):
     return -x * math.sin(err) + ye * math.cos(err)
 
 
+def expected_end(st):
+    """Where the reference end should appear now (robot frame y), from the map pose relative to the station's
+    final pose (good to ~10 cm): picks the right piece when the face is split into several runs."""
+    if 'pose' not in st:
+        return st['end_y']
+    try:
+        x, y, _ = map_pose()
+    except Exception:
+        return st['end_y']
+    fx, fy, fh = st['pose']; h = math.radians(fh)
+    yr = -math.sin(h) * (x - fx) + math.cos(h) * (y - fy)     # robot left (+) of the station's line
+    return st['end_y'] - yr
+
+
 def lat_error(m, st, gap):
     """Sideways move (m, + = left) that puts the station's reference face end at its taught lateral position at
     the final pose: measured along the face (independent of the current heading) and including the drift of
     the straight drive still to come at the current heading."""
-    ye = end_y(m, st['side'], st['end_y'])
+    ye = end_y(m, st['side'], expected_end(st))
     taught = _face_lateral(-YAW_OFF[0], FRONT + st['gap'], st['end_y'])
     now = _face_lateral(m['err'], m['dist'], ye) + (m['dist'] - FRONT - gap) * math.sin(m['err'])
     return (now - taught) / math.cos(m['err'])
@@ -395,13 +409,21 @@ def model_hits_mask(p, fwd, sz, place):
     return hit
 
 
+SURF = [None]          # top of the work surface for this docking (see plan_approach)
+
+
 def plan_approach(m, st, gap):
     """Check the final approach to the TAUGHT pose (the arm motion is hard-coded, so the base never picks
     another spot): sideways move to the taught lateral position, straight forward to the taught gap, and -
     for a place station - the spot under the tray must be empty.  Any problem -> stop and report."""
     p = RM.remove_self(cloud(), CFG)                          # own points out BEFORE the cloud is shifted below
     dy = lat_error(m, st, gap)                                 # +: robot must move left
-    fwd = m['dist'] - FRONT - gap; sz = RM.surface_height(p, m['dist'])
+    fwd = m['dist'] - FRONT - gap
+    if SURF[0] is None:
+        # measured once, from the first (farthest) view: close to the edge the belt is seen at a grazing angle
+        # and a lower frame layer can come out as "the surface" (0.74 instead of 0.82 m, measured)
+        SURF[0] = RM.surface_height(p, m['dist'])
+    sz = SURF[0]
     p = accepted_filter(p, st, fwd, dy)
     log('plan: sideways %.3f m, forward %.3f m, surface top %s m' % (dy, fwd, None if sz is None else round(sz, 3)))
     need_clear(RM.sweep_hits(p, CFG, 0.0, dy), 'sideways move to the taught position')
@@ -1106,15 +1128,35 @@ elif cmd in ('dock', 'redock'):
             m = measure_station(st, gap, m['dist'] - first)
             log('  stage 2 measure', pub(m))
             plan_approach(m, st, gap)
-            m = align_lateral(m, st, gap)
-            m = align_heading(m)
-            m = align_lateral(m, st, gap)
+            if os.path.exists(os.path.join(REF_DIR, name + '.npy')):
+                # close to the edge its end flickers by ~5 cm (measured at D): sideways / heading from the
+                # reference scan of the final pose instead (all surrounding structure, ~1 cm)
+                for _ in range(3):
+                    rx, ry, ra = ref_offset(name)
+                    if abs(ra) > math.radians(1.0):
+                        need_clear(RM.turn_hits(accepted_filter(RM.remove_self(cloud(), CFG), st, rx, ry), CFG, ra),
+                                   'heading correction'); rel(0.0, ra); continue
+                    if abs(ry) <= REF_TOL:
+                        break
+                    need_clear(RM.sweep_hits(accepted_filter(RM.remove_self(cloud(), CFG), st, rx, ry), CFG, 0.0, ry),
+                               'sideways correction'); rel(0.0, 0.0, y=ry)
+                m = measure_station(st, gap, m['dist'])
+            else:
+                m = align_lateral(m, st, gap)
+                m = align_heading(m)
+                m = align_lateral(m, st, gap)
             fwd = m['dist'] - FRONT - gap
             log('forward %.3f m (last stage)' % fwd)
             plan_approach(m, st, gap)
         rel(fwd + FWD_SHORT, 0.0); total += fwd + FWD_SHORT
         YLIM[0] = 2.5; f = measure(near=True)
         res = dict(name=name, gap_target=gap, gap=f['gap'], ang_deg=f['ang_deg'], lat_err=round(lat_error(f, st, f['gap']), 4), fwd=round(fwd, 4))
+        if os.path.exists(os.path.join(REF_DIR, name + '.npy')):
+            try:
+                rx, ry, ra = ref_offset(name)
+                res.update(ref_err_x=round(rx, 4), ref_err_y=round(ry, 4), ref_err_yaw_deg=round(math.degrees(ra), 2))
+            except SystemExit as e:
+                res.update(ref_err=str(e))
         log('FINAL', json.dumps(res))
         json.dump(dict(fwd=total, gap=gap, t=time.time()), open('/tmp/claude_dock_last.json', 'w'))
         new = not __import__('os').path.exists(LOG_FILE)
