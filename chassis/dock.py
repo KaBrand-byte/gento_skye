@@ -717,6 +717,14 @@ elif cmd == 'teach-staging':
         s0.pop(k, None)
     if 'map' in args[1:]:
         s0['mode'] = 'map'
+    if s0.get('mode') != 'map':
+        # lidar docking from here: the station's approach line must be within reach (sideways, then straight in)
+        fx, fy, fh = s0['pose']; c, sn = math.cos(-math.radians(fh)), math.sin(-math.radians(fh))
+        xr, yr = c * (x - fx) - sn * (y - fy), sn * (x - fx) + c * (y - fy)      # safe point in the final-pose frame
+        if not (0.0 <= -xr <= MAX_FWD and abs(yr) <= LAT_PLAN_MAX - 0.1):
+            raise SystemExit('ABORT: this point is %.2f m behind and %.2f m to the %s of %s - for lidar docking it must '
+                             'be 0-%.1f m behind and at most %.1f m to the side' % (-xr, abs(yr), 'left' if yr > 0 else 'right',
+                                                                                  name, MAX_FWD, LAT_PLAN_MAX - 0.1))
     dx, dy, da = rel_target(s0['pose'])
     json.dump(st, open(ST_FILE, 'w'), indent=1)
     log('safe point of %s: (%.3f, %.3f); the station is %.2f m away; mode %s' % (name, x, y, math.hypot(dx, dy), s0.get('mode', 'face')))
