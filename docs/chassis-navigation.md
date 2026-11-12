@@ -149,6 +149,33 @@ bash ~/gento_skye/chassis/client/orin_task.sh stop             # 软件停止：
 - 运行前确认 Apex 遥操作没有在控制手臂；目前只有 `apex-backend` 在运行。
 - 充电位附近（紧贴虚拟墙、地图清理过）的扫描匹配不可靠，开机自检可能判定“定位不可靠”。出发前先把车推进工作区，再运行 `run.sh check` 或开机自检，确认定位正确后再开始。
 
+## 4.3 在 Linux 上操作（Orin 本机或实验室 Ubuntu 电脑，不需要 Windows）
+
+整个任务本来就在机器人上运行：导航与停靠在底盘上，任务程序（双臂 + 导航顺序）在 Orin 的 tmux 会话里。操作工具 [`tools/gento.sh`](../tools/gento.sh) 与 `gento.ps1` 命令相同（`task`、`task-attach`、`task-stop`、`goto D`、`relocate`、`status`……），会动车的命令都先要求输入 y。
+
+**在 Orin 上直接用（推荐）**，一次性设置：
+
+```bash
+mkdir -p ~/.local/bin && ln -sf ~/gento_skye/tools/gento.sh ~/.local/bin/gento
+gento setup          # Orin -> 底盘免密登录（只需输入一次底盘密码）
+```
+
+之后 `ssh nvidia@192.168.8.100`，运行 `gento task`（例如 `gento task --down-mm 120`、`gento task --holding`）。任务在 tmux 里运行，SSH 断开不影响；重新登录后 `gento task-attach` 回到任务窗口，`Ctrl-b d` 离开窗口而不停止任务。工具会自动识别在 Orin 上运行：任务在本机启动，底盘命令走有线网 `sunrise@6.6.7.6`。
+
+**在实验室的 Ubuntu 电脑上用**：`~/.ssh/config` 加入
+
+```
+Host orin
+  HostName 192.168.8.100
+  User nvidia
+Host chassis
+  HostName 6.6.7.6
+  User sunrise
+  ProxyJump orin
+```
+
+再 `ssh-copy-id orin`、`ssh-copy-id chassis`（各输入一次密码），然后运行 `tools/gento.sh <命令>`；`gento.sh web` 通过 SSH 隧道打开底盘网页。
+
 ## 5. 运行与调试命令
 
 在底盘上（`~/gento_dock/run.sh …`），或在 Windows 电脑上用 [`tools/gento.ps1`](../tools/gento.ps1)：
