@@ -470,7 +470,8 @@ def find_staging(p, dist, back):
             return False
         f = RM.max_forward(p + np.array([b, 0.0, 0.0]), CFG, b)
         return f is not None and f >= b - 0.005
-    bs = [b for b in np.arange(back, MAX_FWD + 0.001, 0.05) if dist + b <= 2.1]
+    # from `back` outwards first; then closer spots (down to right beside the pose: slide in sideways)
+    bs = [b for b in np.arange(back, MAX_FWD + 0.001, 0.05) if dist + b <= 2.1] + list(np.arange(0.0, back - 0.001, 0.05))
     ss = sorted(np.arange(-LAT_PLAN_MAX + 0.1, LAT_PLAN_MAX - 0.1 + 0.001, 0.05), key=abs)
     return next(((round(float(b), 3), round(float(s), 3)) for s in ss for b in bs if ok(b, s)), None)
 
@@ -527,8 +528,8 @@ elif cmd == 'teach-pose':
     if not m:
         raise SystemExit('ABORT: no face found ahead (z band %.2f-%.2f m)' % tuple(ZB))
     log('face at the final pose', pub(m))
-    if m['dist'] + back < FRONT + GRIP + 0.10 or m['dist'] + back > 2.1 or not 0.25 <= back <= MAX_FWD:
-        raise SystemExit('ABORT: BACK %.2f m gives a staging distance of %.2f m to the face (need 0.77-2.1, BACK 0.25-%.2f)'
+    if m['dist'] + back > 2.1 or not 0.0 <= back <= MAX_FWD:
+        raise SystemExit('ABORT: BACK %.2f m gives a staging distance of %.2f m to the face (need <= 2.1, BACK 0-%.2f)'
                          % (back, m['dist'] + back, MAX_FWD))
     ey = end_y(m, side)
     if abs(ey) > YLIM[0] - 0.15:
@@ -558,15 +559,14 @@ elif cmd == 'teach-pose':
         log('staging spot: %.2f m back, %.2f m to the %s of the final pose (turning clear there)'
             % (b, abs(s), 'right' if s >= 0 else 'left'))
         st[name].update(staging_pose=staging_pose_of(st[name]['pose'], b, s), back=b, staging_right=s)
-    elif 'staging' in old:
-        # no room to turn in place near the station: keep the vendor station, whose navigation arrives already
-        # facing the right way (only small alignment turns there)
-        notes.append('no spot within %.1f m back / %.1f m sideways where the arms can turn in place (%s): keeping '
-                     'vendor station %s as staging (it arrives facing the face)'
-                     % (MAX_FWD, LAT_PLAN_MAX - 0.1, json.dumps(RM.rotation_hits(p + np.array([back, 0, 0]), CFG)), old['staging']))
     else:
-        raise SystemExit('ABORT: no staging spot where the arms can turn in place and no vendor station for %s - '
-                         'record a station on the web page first' % name)
+        # a vendor station may face another edge (e.g. an older station): never fall back to it silently
+        st[name]['no_staging'] = True
+        notes.append('NO STAGING SPOT: nowhere within %.1f m back / %.1f m sideways can the arms turn in place and '
+                     'then slide / drive straight to this pose; docking at %s will stop until there is one (move '
+                     'what is in the way, then run restage %s)' % (MAX_FWD, LAT_PLAN_MAX - 0.1, name, name))
+    if pick is not None:
+        st[name].pop('no_staging', None)
     json.dump(st, open(ST_FILE, 'w'), indent=1)
     for t in notes:
         log('NOTE:', t)
@@ -586,7 +586,7 @@ elif cmd == 'restage':
         raise SystemExit('ABORT: no staging spot where the arms can turn in place (within %.1f m back, %.1f m '
                          'sideways); %s unchanged' % (MAX_FWD, LAT_PLAN_MAX - 0.1, name))
     b, s = pick
-    s0.update(staging_pose=staging_pose_of(s0['pose'], b, s), back=b, staging_right=s)
+    s0.update(staging_pose=staging_pose_of(s0['pose'], b, s), back=b, staging_right=s); s0.pop('no_staging', None)
     json.dump(st, open(ST_FILE, 'w'), indent=1)
     log('staging spot: %.2f m back, %.2f m to the %s of the final pose' % (b, abs(s), 'right' if s >= 0 else 'left'))
     log('restaged', name, json.dumps(s0))
@@ -596,6 +596,9 @@ elif cmd in ('dock', 'redock'):
     ZB[0], ZB[1] = st['z']
     # fine-tune: lat_offset (m, + = robot further left) shifts the lateral target; yaw_offset (deg, + = left)
     st['end_y'] = st['end_y'] - float(st.get('lat_offset', 0.0)); YAW_OFF[0] = math.radians(float(st.get('yaw_offset', 0.0)))
+    if st.get('no_staging') and cmd == 'dock':
+        raise SystemExit('ABORT: station %s has no staging spot where the arms can turn in place - move what is in '
+                         'the way and run restage %s, or teach the station somewhere with more room' % (name, name))
     if st.get('lat_offset') or st.get('yaw_offset'):
         log('fine-tune: lat_offset %.3f m, yaw_offset %.2f deg' % (st.get('lat_offset', 0.0), st.get('yaw_offset', 0.0)))
     if cmd == 'dock' and dry:
@@ -632,7 +635,7 @@ elif cmd in ('dock', 'redock'):
                 raise SystemExit('ABORT: navigation ended %.2f m from the staging point (task cancelled or failed?)' % dd)
         if 'staging_pose' in st:   # pose tasks keep the start heading: turn to the face here (staging is clear all round)
             turn_to(math.radians(st['staging_pose'][2]))
-    m = measure()
+    m = measure() or measure(near=True)          # near: staging spots right beside the final pose
     if not m:
         raise SystemExit('ABORT: no face found ahead')
     log('staging measure', pub(m))
