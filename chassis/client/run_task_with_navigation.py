@@ -7,10 +7,12 @@ Order (run from the repository root on the machine that runs skye_task, ROS env 
   3. navigate to the start station     (default T, the handover point)            <- chassis moves
   4. handover                          press Enter: the grippers close (and stay checked while driving)
   5. navigate to the place station     (default D, the conveyor)                  <- chassis moves
-  6. skye_task Sequence.start()        (close again: no-op), forward, down, open, up, transition, ready
-  7. return (unless --no-return)       reverse straight out of the place station   <- chassis moves
-                                       a fresh Sequence.prepare(): arms back to the carry (receive) pose
-                                       navigate to the start station again, ready for the next tray
+  6. place                            skye_task's own motion steps: forward, down, open, up, and back by the
+                                       forward distance - i.e. straight back into the carry pose (no detour
+                                       over transition / ready, no second prepare)
+  7. return (unless --no-return)       reverse straight out of the place station, turn, dock at the start
+                                       station again: arms in the carry pose, grippers open - ready for the
+                                       next tray.  A new run started like this does not move the arms at all.
 
 While the chassis drives, the arm/lift/waist feedback is checked continuously through the sequence's own
 `checked_feedback()`; Ctrl-C / SIGTERM, an arm deviation, a chassis failure or a timeout stops BOTH the
@@ -38,7 +40,7 @@ from skye_task.__main__ import wait_for_start, write_report  # noqa: E402
 from skye_task.config import load_config  # noqa: E402
 from skye_task.interfaces import GripperAction, GripperTarget  # noqa: E402
 from skye_task.sdk import GentoSDK, MotionError  # noqa: E402
-from skye_task.sequence import Result, Sequence  # noqa: E402
+from skye_task.sequence import FIXED_AXES, Result, Sequence  # noqa: E402
 
 
 class Trial:
@@ -52,10 +54,10 @@ class Trial:
         self._sdk = None
 
     @staticmethod
-    def check_arm_start(config):
-        """His prepare() first moves the arms STRAIGHT to the ready pose.  From the receive side that path made the
-        two arms collide (2026-11-12, e-stop); his own return path goes receive -> transition -> ready.  Only start
-        when the arms are at the ready or transition pose (5 deg), otherwise stop before anything moves."""
+    def arm_start(config):
+        """Where the arms are before anything moves: "carry" (receive pose: start without arm motion), "prepare"
+        (ready / transition pose: skye_task's prepare()).  Anything else stops: his prepare() first moves the
+        arms STRAIGHT to the ready pose, and from the receive side that made the arms collide (2026-11-12)."""
         sdk = GentoSDK(config)
         try:
             sdk.connect()
@@ -64,11 +66,70 @@ class Trial:
             sdk.close()
             time.sleep(LINK_RELEASE_S)
 
-        def near(pose):
-            return all(abs(a - b) <= 5.0 for arm, target in zip(joints, pose) for a, b in zip(arm, target))
-        if not (near(config.ready) or near(config.transition)):
-            raise MotionError("双臂不在准备位或过渡位，prepare() 会直接回准备位（曾导致双臂相撞）。请先经过渡位把双臂移回准备位。"
-                              f"当前关节: {[[round(v, 1) for v in arm] for arm in joints]}")
+        def near(pose, tol=5.0):
+            return all(abs(a - b) <= tol for arm, target in zip(joints, pose) for a, b in zip(arm, target))
+        if near(config.receive, 1.0):
+            return "carry"
+        if near(config.ready) or near(config.transition):
+            return "prepare"
+        raise MotionError("双臂既不在运输（接盘）位，也不在准备位或过渡位；prepare() 会直接回准备位（曾导致双臂相撞）。"
+                          "请先经过渡位把双臂移回准备位。"
+                          f"当前关节: {[[round(v, 1) for v in arm] for arm in joints]}")
+
+    def attach_at_carry(self):
+        """The arms already stand in the carry (receive) pose (e.g. left there by the previous run): do what
+        skye_task's prepare() does to connect and enable - without any arm or lift motion - and open the grippers
+        for the handover."""
+        seq, sdk, gripper = self.sequence, self._sdk, self.gripper
+        seq.begin = time.monotonic()
+        seq._checkpoint()
+        if gripper is not None:
+            gripper.reserve()
+        seq.result.metadata = sdk.connect()
+        feedback = sdk.read()
+        seq._guard(feedback, require_position=False)
+        if any(state >= 3 for state in feedback.trajectory_states):
+            raise MotionError("已有双臂轨迹正在执行，需人工处理")
+        if any(not seq._near(a, t) for a, t in zip(feedback.joints, seq.config.receive)):
+            raise MotionError("双臂已不在运输（接盘）位")
+        seq.fixed = {name: list(feedback.rt[name]["fb_pos"][:size]) for name, size in FIXED_AXES.items()}
+        sdk.enter_position(feedback, seq._checkpoint)
+        seq.result.metadata["tool_xyzabc_mm_deg"] = sdk.tools
+        seq._record("initialized", status="completed", note="arms already in the carry pose: no arm motion")
+        if gripper is not None:
+            gripper.connect()
+            seq._gripper_action("open_before_receive", GripperAction.OPEN)
+        seq.prepared = True
+        seq._record("awaiting_task_start", status="waiting")
+
+    def place_and_back_to_carry(self):
+        """Place with skye_task's own motion steps - forward, down, open, up - then back by the forward distance,
+        i.e. straight back into the carry pose along the path just taken (his start() ends at the ready pose via
+        the transition pose instead, and a second prepare() would follow).  Grippers stay open."""
+        seq, c = self.sequence, self.sequence.config
+        feedback = seq.checked_feedback()
+        if any(not seq._near(a, t) for a, t in zip(feedback.joints, c.receive)):
+            raise MotionError("放置前双臂已偏离运输（接盘）位")
+        if any(feedback.trajectory_states):
+            raise MotionError("放置前双臂轨迹尚未空闲")
+        seq.started = True
+        seq._move_linear("forward", [[c.forward_mm, 0, 0]] * 2, c.forward)
+        seq._move_linear("down", [[0, 0, -c.down_mm]] * 2, c.down)
+        if self.gripper is not None:
+            seq._gripper_action("release", GripperAction.OPEN)
+        else:
+            seq._record("release", status="skipped", reason="配置关闭夹爪")
+        seq._move_linear("up", [[0, 0, c.up_mm]] * 2, c.up)
+        seq._move_linear("back_to_carry", [[-c.forward_mm, 0, 0]] * 2, c.forward)
+        feedback = seq.checked_feedback()
+        if any(not seq._near(a, t) for a, t in zip(feedback.joints, c.receive)):
+            seq._move_joint("carry", c.receive)          # tiny correction if the planner ended a little off
+        seq.result.motion_completed = True
+        if self.gripper is not None:
+            seq.result.gripper_actions = "completed"
+        seq.result.status = "completed"
+        seq.result.finished_at = datetime.now(timezone.utc).isoformat()
+        seq._record("finished", status="completed", grasped=None, placed=None)
 
     def make_sequence(self, sdk, config, label=""):
         """His Sequence with the grippers driven the same way skye_task's own `run` does."""
@@ -153,25 +214,11 @@ class Trial:
                 self.navigating = False
         return ""
 
-    def return_to_start(self, config, sdk):
-        """After placing: reverse out along the approach (arms are in the ready pose), arms back to the carry
-        (receive) pose with a fresh SDK link + Sequence (a Sequence runs once), dock at the start station again."""
+    def return_to_start(self):
+        """After placing (arms already back in the carry pose): reverse out along the approach, then dock at the
+        start station again - the chassis job turns where turning is clear."""
         self.navigate("undock", undock=True)
-        placed = self.sequence
-        self.release_hardware()
-        sdk = GentoSDK(config)
-        self.sequence = self.make_sequence(sdk, config, "return ")
-        try:
-            self.sequence.prepare()
-            self.navigate(self.args.start)
-        except (Exception, KeyboardInterrupt) as error:
-            self.sequence.fail(error)
-            placed.result.metadata["return_error"] = self.sequence.result.error
-            raise
-        finally:
-            placed.result.metadata["return_steps"] = self.sequence.result.steps
-            self.return_sequence, self.sequence = self.sequence, placed
-        return sdk
+        self.navigate(self.args.start)
 
     def run(self):
         a = self.args
@@ -184,8 +231,11 @@ class Trial:
         old = {s: signal.signal(s, lambda *_: self.sequence.request_stop()) for s in (signal.SIGINT, signal.SIGTERM)}
         exit_code = 1
         try:
-            self.check_arm_start(config)                    # before any motion
-            self.sequence.prepare()                         # arms into the carry (receive) pose, lift 450
+            if self.arm_start(config) == "carry":           # before any motion
+                logging.info("双臂已在运输（接盘）位：不动手臂，直接接入")
+                self.attach_at_carry()
+            else:
+                self.sequence.prepare()                     # arms into the carry (receive) pose
             if a.selfscan:
                 logging.info("selfscan: %s", self.nav.selfscan())
             if a.start:
@@ -194,9 +244,9 @@ class Trial:
             wait_for_start(self.sequence)
             self.close_grippers()
             self.navigate(a.place)
-            self.sequence.start()                           # forward, down, hands out, back to ready
+            self.place_and_back_to_carry()                  # forward, down, open, up, back -> carry pose
             if a.start and not a.no_return:
-                sdk = self.return_to_start(config, sdk)
+                self.return_to_start()
             exit_code = 0
         except (Exception, KeyboardInterrupt) as error:
             logging.error("流程停止: %s", error)

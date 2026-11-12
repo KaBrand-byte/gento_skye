@@ -139,8 +139,7 @@ class RunnerTests(unittest.TestCase):
                                        ("start", "undock"), ("start", "T")])
         names = [s["name"] for s in report["steps"]]
         self.assertLess(names.index("receive_lift"), names.index("forward"))   # carry pose held while driving
-        back = [s["name"] for s in report["metadata"]["return_steps"]]
-        self.assertEqual(back[-2:], ["handover_and_close", "awaiting_task_start"])   # carry pose again before driving back
+        self.assertEqual(names[-2:], ["back_to_carry", "finished"])   # straight back into the carry pose, then drive
 
     def test_grippers_close_at_the_start_station_before_driving_to_the_place_station(self):
         data = json.loads(self.cfg.read_text()); data["gripper_enabled"] = True
@@ -151,13 +150,24 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(report["status"], "completed")
         events = [e for e in FakeNav.log if e[0] in ("grip", "start")]
         self.assertEqual(events, [("grip", "open"), ("start", "T"), ("grip", "close"), ("start", "D"),
-                                  ("grip", "close"), ("grip", "open"), ("start", "undock"),
-                                  ("grip", "open"), ("start", "T")])
+                                  ("grip", "open"), ("start", "undock"), ("start", "T")])
+        names = [s["name"] for s in report["steps"]]
+        placing = [n for n in names if n in ("forward", "down", "release", "up", "back_to_carry")]
+        self.assertEqual(list(dict.fromkeys(placing)), ["forward", "down", "release", "up", "back_to_carry"])
+        self.assertNotIn("return_transition", names)                     # no detour over transition / ready
 
-    def test_refuses_to_start_with_the_arms_at_the_receive_pose(self):
+    def test_starting_in_the_carry_pose_does_not_move_the_arms(self):
         from skye_task.config import load_config
         receive = load_config(self.cfg).receive
         code, report = self.run_trial(arms=receive)
+        self.assertEqual(code, 0)
+        names = [s["name"] for s in report["steps"]]
+        self.assertNotIn("ready", names)
+        self.assertNotIn("receive", names)
+        self.assertEqual(FakeNav.log[1:3], [("start", "T"), ("start", "D")])
+
+    def test_refuses_to_start_with_the_arms_somewhere_else(self):
+        code, report = self.run_trial(arms=[[10.0] * 7, [-10.0] * 7])
         self.assertEqual(code, 1)
         self.assertNotIn(("start", "T"), FakeNav.log)                     # nothing moved
 
