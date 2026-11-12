@@ -126,10 +126,10 @@ def safe_rotate(yaw):
 
 def measure(near=False):
     a = cloud(fresh=True)
-    if near:   # exclude the gripper zone only if the fit band reaches gripper height
+    if near:   # close to the face: leave out only the robot's own points (measured arm shape), not a whole zone
         sel = (a[:, 0] > FRONT + 0.02) & (a[:, 0] < 1.3) & (np.abs(a[:, 1]) < YLIM[0])
         if ZB[1] > 0.75:
-            sel &= ~((a[:, 0] < FRONT + GRIP + 0.05) & (np.abs(a[:, 1]) < 0.55))
+            sel &= ~RM.self_mask(a, CFG, 0.03)
     else:
         sel = (a[:, 0] > FRONT + GRIP + 0.08) & (a[:, 0] < 2.2) & (np.abs(a[:, 1]) < YLIM[0])
     sel &= (a[:, 2] >= ZB[0]) & (a[:, 2] < ZB[1])
@@ -456,6 +456,40 @@ def wait_task(tmo=150, near=None, tol=STAGING_TOL):
     return False
 
 
+def find_staging(p, dist, back):
+    """p: cloud (own points removed) in the frame of a station's FINAL pose; dist: centre -> face there.
+    Staging spot b m behind and s m to the right of the final pose, where the robot + arms + tray can turn in
+    place (also STAGING_MARGIN around it: navigation stops a few cm off), and the sideways move back onto the
+    final line and the straight approach are clear.  The nearest one (smallest sideways offset, then smallest
+    distance) from `back` on, as (b, s); None if there is none."""
+    def ok(b, s):
+        if any(RM.rotation_hits(p + np.array([b + db, s + ds, 0.0]), CFG)        # cheapest test first
+               for db, ds in ((0, 0), (STAGING_MARGIN, 0), (-STAGING_MARGIN, 0), (0, STAGING_MARGIN), (0, -STAGING_MARGIN))):
+            return False
+        if RM.sweep_hits(p + np.array([b, s, 0.0]), CFG, 0.0, s):
+            return False
+        f = RM.max_forward(p + np.array([b, 0.0, 0.0]), CFG, b)
+        return f is not None and f >= b - 0.005
+    bs = [b for b in np.arange(back, MAX_FWD + 0.001, 0.05) if dist + b <= 2.1]
+    ss = sorted(np.arange(-LAT_PLAN_MAX + 0.1, LAT_PLAN_MAX - 0.1 + 0.001, 0.05), key=abs)
+    return next(((round(float(b), 3), round(float(s), 3)) for s in ss for b in bs if ok(b, s)), None)
+
+
+def staging_pose_of(pose_deg, b, s):
+    x, y, h = pose_deg; yaw = math.radians(h)
+    return [round(x - b * math.cos(yaw) + s * math.sin(yaw), 3), round(y - b * math.sin(yaw) - s * math.cos(yaw), 3),
+            round(h, 2)]
+
+
+def cloud_in_pose_frame(pose_deg):
+    """Current cloud (own points removed) expressed in the frame of a map pose [x, y, yaw_deg] (map localisation)."""
+    xc, yc, yc_yaw = map_pose(); p = RM.remove_self(cloud(fresh=True), CFG)
+    c, s = math.cos(yc_yaw), math.sin(yc_yaw)
+    mx, my = c * p[:, 0] - s * p[:, 1] + xc, s * p[:, 0] + c * p[:, 1] + yc
+    x, y, h = pose_deg; c, s = math.cos(-math.radians(h)), math.sin(-math.radians(h))
+    return np.stack([c * (mx - x) - s * (my - y), s * (mx - x) + c * (my - y), p[:, 2]], 1)
+
+
 cmd = sys.argv[1]; args = sys.argv[2:]; dry = '--dry' in args; args = [a for a in args if a != '--dry']
 if '--wide' in args:
     YLIM[0] = 2.5; args.remove('--wide')
@@ -512,20 +546,7 @@ elif cmd == 'teach-pose':
         h = RM.place_motion_hits(p, CFG, 0.0, sz) if sz is not None else {'what': 'surface not seen'}
         if h:
             notes.append('place motion from here would hit %s' % json.dumps(h))
-    # staging: b m behind and s m to the right of the final pose, where the robot + arms + tray can turn in
-    # place, the sideways move back onto the final line and the straight approach are clear.  Nearest such
-    # spot (smallest sideways offset, then smallest distance) from BACK on; else BACK straight behind.
-    def staging_ok(b, s):
-        q = p + np.array([b, s, 0.0])                         # the cloud as seen from that staging spot
-        f = RM.max_forward(p + np.array([b, 0.0, 0.0]), CFG, b)
-        if RM.sweep_hits(q, CFG, 0.0, s) or f is None or f < b - 0.005:
-            return False
-        # turning must stay clear if navigation stops up to STAGING_MARGIN off the spot
-        return not any(RM.rotation_hits(p + np.array([b + db, s + ds, 0.0]), CFG)
-                       for db, ds in ((0, 0), (STAGING_MARGIN, 0), (-STAGING_MARGIN, 0), (0, STAGING_MARGIN), (0, -STAGING_MARGIN)))
-    bs = [b for b in np.arange(back, MAX_FWD + 0.001, 0.05) if m['dist'] + b <= 2.1]
-    ss = sorted(np.arange(-LAT_PLAN_MAX + 0.1, LAT_PLAN_MAX - 0.1 + 0.001, 0.05), key=abs)
-    pick = next(((float(b), float(s)) for s in ss for b in bs if staging_ok(b, s)), None)
+    pick = find_staging(p, m['dist'], back)
     st[name] = dict(old, side=side, gap=round(m['gap'], 4), end_y=round(ey, 4),
                     yaw_offset=round(-m['ang_deg'], 2), z=list(ZB),
                     pose=[round(x, 3), round(y, 3), round(math.degrees(yaw), 2)], taught=time.strftime('%Y-%m-%d %H:%M:%S'))
@@ -536,9 +557,7 @@ elif cmd == 'teach-pose':
         b, s = pick
         log('staging spot: %.2f m back, %.2f m to the %s of the final pose (turning clear there)'
             % (b, abs(s), 'right' if s >= 0 else 'left'))
-        st[name].update(staging_pose=[round(x - b * math.cos(yaw) + s * math.sin(yaw), 3),
-                                      round(y - b * math.sin(yaw) - s * math.cos(yaw), 3), round(math.degrees(yaw), 2)],
-                        back=round(b, 3), staging_right=round(s, 3))
+        st[name].update(staging_pose=staging_pose_of(st[name]['pose'], b, s), back=b, staging_right=s)
     elif 'staging' in old:
         # no room to turn in place near the station: keep the vendor station, whose navigation arrives already
         # facing the right way (only small alignment turns there)
@@ -552,6 +571,25 @@ elif cmd == 'teach-pose':
     for t in notes:
         log('NOTE:', t)
     log('taught', name, json.dumps(st[name]))
+elif cmd == 'restage':
+    # restage NAME [BACK] : NO MOTION.  Recompute the staging spot of a station taught with teach-pose, from
+    # the current scan (robot anywhere near the station, localisation good), e.g. after the robot model changed.
+    name = args[0]; back = float(args[1]) if len(args) > 1 else 0.5
+    st = load_st(); s0 = st[name]
+    if 'pose' not in s0:
+        raise SystemExit('ABORT: %s has no taught final pose (use teach-pose)' % name)
+    check_localisation()
+    p = cloud_in_pose_frame(s0['pose'])
+    log('model at the final pose:', json.dumps(RM.sweep_hits(p, CFG, 0.0, 0.0)) or 'clear')
+    pick = find_staging(p, s0['gap'] + FRONT, back)
+    if pick is None:
+        raise SystemExit('ABORT: no staging spot where the arms can turn in place (within %.1f m back, %.1f m '
+                         'sideways); %s unchanged' % (MAX_FWD, LAT_PLAN_MAX - 0.1, name))
+    b, s = pick
+    s0.update(staging_pose=staging_pose_of(s0['pose'], b, s), back=b, staging_right=s)
+    json.dump(st, open(ST_FILE, 'w'), indent=1)
+    log('staging spot: %.2f m back, %.2f m to the %s of the final pose' % (b, abs(s), 'right' if s >= 0 else 'left'))
+    log('restaged', name, json.dumps(s0))
 elif cmd in ('dock', 'redock'):
     # dock NAME [GAP]: navigate to staging (unless redock), align heading, lateral, heading, straight in
     name = args[0]; st = load_st()[name]; gap = float(args[1]) if len(args) > 1 else st['gap']; YLIM[0] = 2.5

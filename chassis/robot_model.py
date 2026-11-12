@@ -73,9 +73,16 @@ def boxes(cfg, phase='carry'):
     out = [('chassis', [-FRONT, FRONT, -HALF_W, HALF_W, 0.02, 0.45]),
            ('torso', [-0.30, 0.18, -0.29, 0.29, 0.45, sz + 0.39]),
            ('tray', tray_box(cfg))]
+    slices = cfg['phases'].get(phase + '_slices')
     for b in cfg['phases'].get(phase, []):
         z0, z1 = _z(b[4], sz), _z(b[5], sz)
-        out.append(('arms', [b[0], b[1], b[2], b[3], z0, z1]))
+        if slices:
+            # measured shape (selfscan): 5 cm slices along x, each with its own lowest point and width
+            out += [('arms', [float(v) for v in c]) for c in slices]
+            near = [c[4] for c in slices if c[0] < 0.20]
+            z0 = min(near) if near else min(c[4] for c in slices)
+        else:
+            out.append(('arms', [b[0], b[1], b[2], b[3], z0, z1]))
         # upper arms / shoulders beside the torso (the lidar cannot see them well): same width and heights,
         # from behind the shoulder axis to where the measured forearms start
         out.append(('upper_arms', [-0.15, max(b[0], 0.0), b[2], b[3], z0, max(z1, sz + 0.12)]))
@@ -87,6 +94,14 @@ def boxes(cfg, phase='carry'):
 def _inside(p, b, m):
     return ((p[:, 0] > b[0] - m) & (p[:, 0] < b[1] + m) & (p[:, 1] > b[2] - m) & (p[:, 1] < b[3] + m)
             & (p[:, 2] > b[4] - m) & (p[:, 2] < b[5] + m))
+
+
+def self_mask(p, cfg, margin, phase='carry'):
+    """Points inside the robot's own boxes (+ margin)."""
+    inside = np.zeros(len(p), bool)
+    for _, b in boxes(cfg, phase):
+        inside |= _inside(p, b, margin)
+    return inside
 
 
 def remove_self(p, cfg, phase='carry'):
@@ -120,16 +135,30 @@ def turn_hits(p, cfg, yaw, phase='carry', step_deg=0.5):
     return _report(p, hit, 'turn %.1f deg' % math.degrees(yaw))
 
 
+ZSTEP = 0.01
+
+
+def _rot_radius(cfg, phase, m):
+    """Radius swept by the robot when turning in place, per 1 cm height bin (max over the boxes reaching into
+    that bin, + margin)."""
+    zs = np.arange(0.0, 2.6, ZSTEP); R = np.zeros(len(zs))
+    for _, b in boxes(cfg, phase):
+        rb = max(math.hypot(x, y) for x in (b[0], b[1]) for y in (b[2], b[3])) + m
+        sel = (zs + ZSTEP > b[4] - m) & (zs < b[5] + m)
+        R[sel] = np.maximum(R[sel], rb)
+    return R
+
+
+def _point_radius(p, cfg, phase, m):
+    R = _rot_radius(cfg, phase, m)
+    return R[np.clip((p[:, 2] / ZSTEP).astype(int), 0, len(R) - 1)]
+
+
 def rotation_hits(p, cfg, phase='carry'):
     """Turning in place sweeps each box through a circle: any obstacle inside that circle, in that box's
     height band, is a collision.  None when clear, else the nearest offending point."""
-    m = cfg['margin']; p = remove_self(p, cfg, phase); r = np.hypot(p[:, 0], p[:, 1]); worst = None
-    for name, b in boxes(cfg, phase):
-        R = max(math.hypot(x, y) for x in (b[0], b[1]) for y in (b[2], b[3])) + m
-        h = _report(p, (r < R) & (p[:, 2] > b[4] - m) & (p[:, 2] < b[5] + m), 'rotate:' + name)
-        if h and (worst is None or math.hypot(h['x'], h['y']) < math.hypot(worst['x'], worst['y'])):
-            worst = h
-    return worst
+    m = cfg['margin']; p = remove_self(p, cfg, phase)
+    return _report(p, np.hypot(p[:, 0], p[:, 1]) < _point_radius(p, cfg, phase, m), 'rotate')
 
 
 NOISE = 10        # fewer offending lidar returns than this are treated as noise (same rule as _report)
@@ -247,11 +276,12 @@ def surface_height(p, face_dist, depth=0.35):
 
 
 def _turn_clear_distance(q, R, u, max_d):
-    """Smallest d in [0, max_d] such that every point of q (2-D, robot frame) is farther than R from d*u
-    (noise rule applied); None if none."""
+    """Smallest d in [0, max_d] such that every point of q (2-D, robot frame) is farther than R (scalar, or one
+    radius per point) from d*u (noise rule applied); None if none."""
     t = q @ u; perp2 = (q ** 2).sum(1) - t ** 2
-    close = perp2 < R * R
-    s = np.sqrt(np.maximum(R * R - perp2[close], 0.0))
+    R2 = np.broadcast_to(np.asarray(R, float) ** 2, perp2.shape)
+    close = perp2 < R2
+    s = np.sqrt(np.maximum(R2[close] - perp2[close], 0.0))
     iv = np.stack([t[close] - s, t[close] + s], 1)
     free = _free_points(iv, 0.0, float(max_d))
     return free[0][0] if free else None
@@ -264,15 +294,10 @@ def leave_move(p, cfg, max_d=0.6, phase='carry'):
     if not rotation_hits(p, cfg, phase):
         return (0.0, 0.0)
     p = remove_self(p, cfg, phase); m = cfg['margin']; k = math.sqrt(0.5); best = None
+    R = _point_radius(p, cfg, phase, m)
     for ux, uy in ((-1.0, 0.0), (0.0, -1.0), (0.0, 1.0), (-k, -k), (-k, k)):
-        u = np.array([ux, uy]); need = 0.0
-        for _, b in boxes(cfg, phase):
-            R = max(math.hypot(x, y) for x in (b[0], b[1]) for y in (b[2], b[3])) + m
-            band = (p[:, 2] > b[4] - m) & (p[:, 2] < b[5] + m)
-            d = _turn_clear_distance(p[band, :2], R, u, max_d)
-            if d is None:
-                need = None; break
-            need = max(need, d)
+        u = np.array([ux, uy])
+        need = _turn_clear_distance(p[R > 0, :2], R[R > 0], u, max_d)
         if need is None:
             continue
         need = min(max_d, need + 0.02)                  # 2 cm extra: moves stop a little short
@@ -302,6 +327,7 @@ def selfscan(p, face_min=0.95):
     """With nothing else within ~1 m in front, points above the chassis and ahead of the torso are the robot's
     own arms (and tray): report their extent."""
     sel = (p[:, 0] > 0.0) & (p[:, 0] < min(face_min, 1.2)) & (np.abs(p[:, 1]) < 0.6) & (p[:, 2] > 0.5) & (p[:, 2] < 2.2)
+    sel &= ~_inside(p, [-0.30, 0.18, -0.29, 0.29, 0.45, 2.2], 0.02)        # the torso front is not an arm
     s = p[sel]
     if len(s) < 20:
         return None
@@ -312,7 +338,37 @@ def selfscan(p, face_min=0.95):
     box = [round(max(0.0, x[0] - 0.02), 3), round(x[1] + 0.03, 3), round(-hw - 0.03, 3), round(hw + 0.03, 3),
            round(z[0] - 0.03, 3), round(z[1] + 0.05, 3)]
     return dict(n=int(len(s)), x=[round(v, 3) for v in x], y=[round(v, 3) for v in y], z=[round(v, 3) for v in z],
-                carry_box=box)
+                carry_box=box, carry_slices=arm_slices(s, box))
+
+
+SLICE = 0.05
+
+
+def arm_slices(s, box, pad_z=0.03, pad_y=0.03):
+    """The arms (+tray) as 5 cm slices along x: per slice the lowest point (2nd lowest, against noise) and the
+    widest |y| (mirrored: one arm is usually hidden), up to the overall top.  Slices the lidar did not see get
+    the lower / wider of their measured neighbours, so the shape has no holes."""
+    x0 = math.floor(box[0] / SLICE) * SLICE
+    n = max(1, int(math.ceil((box[1] - x0) / SLICE)))
+    zlo = [None] * n; wy = [None] * n
+    s = s[(s[:, 0] >= x0) & (s[:, 0] < x0 + n * SLICE)]
+    k = ((s[:, 0] - x0) / SLICE).astype(int)
+    for i in range(n):
+        q = s[k == i]
+        if len(q) >= 3:
+            zlo[i] = float(np.sort(q[:, 2])[1]); wy[i] = float(np.abs(q[:, 1]).max())
+    seen = [i for i in range(n) if zlo[i] is not None]
+    if not seen:
+        return []
+    out = []
+    for i in range(n):
+        if zlo[i] is None:
+            nb = [j for j in (max([j for j in seen if j < i], default=None),
+                              min([j for j in seen if j > i], default=None)) if j is not None]
+            zlo[i] = min(zlo[j] for j in nb); wy[i] = max(wy[j] for j in nb)
+        out.append([round(x0 + i * SLICE, 3), round(x0 + (i + 1) * SLICE, 3), round(-wy[i] - pad_y, 3),
+                    round(wy[i] + pad_y, 3), round(zlo[i] - pad_z, 3), round(max(box[5], zlo[i] + 0.05), 3)])
+    return out
 
 
 def save_selfscan(res):
@@ -322,6 +378,8 @@ def save_selfscan(res):
     except Exception:
         user = {}
     user.setdefault('phases', {})['carry'] = [res['carry_box']]
+    if res.get('carry_slices'):
+        user['phases']['carry_slices'] = res['carry_slices']
     user['carry_measured'] = {k: res[k] for k in ('n', 'x', 'y', 'z')}
     json.dump(user, open(CFG_FILE, 'w'), indent=1)
     return user

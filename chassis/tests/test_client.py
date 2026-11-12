@@ -133,6 +133,28 @@ class RobotModelTests(unittest.TestCase):
         item = self.block(0.95, 1.00, -0.05, 0.05, 0.85, 0.95, 300)
         self.assertIsNotNone(self.rm.place_hits(self.np.concatenate([belt, item]), self.cfg, 0.3, 0.84))
 
+    def test_measured_arm_shape_passes_over_a_table_top(self):
+        # arms seen by the lidar: forearms at 1.25-1.4 m, grippers down to 1.0 m at x 0.5-0.6 (right side only)
+        arm = self.np.concatenate([self.block(0.25, 0.50, -0.45, -0.30, 1.25, 1.40, 400),
+                                   self.block(0.50, 0.62, -0.25, -0.15, 1.00, 1.30, 300)])
+        r = self.rm.selfscan(arm)
+        cfg = dict(self.cfg, phases=dict(self.cfg["phases"], carry=[r["carry_box"]], carry_slices=r["carry_slices"]))
+        cfg["tray"] = dict(cfg["tray"], z_bottom=1.25)
+        names = [n for n, _ in self.rm.boxes(cfg)]
+        self.assertGreater(names.count("arms"), 3)
+        widths = [b[3] for n, b in self.rm.boxes(cfg) if n == "arms"]
+        self.assertTrue(all(abs(w) >= 0.25 for w in widths))                    # mirrored: both arms covered
+        table = self.block(0.55, 1.20, -0.6, 0.6, 0.88, 0.90, 3000)               # table top 0.9 m, edge at 0.55
+        self.assertIsNone(self.rm.sweep_hits(table, cfg, 0.10, 0.0))             # grippers (>= 0.97 m) pass over it
+        box = dict(self.cfg, phases=dict(self.cfg["phases"], carry=[[0.0, 0.885, -0.468, 0.468, 0.66, 1.424]]))
+        self.assertIsNotNone(self.rm.sweep_hits(table, box, 0.10, 0.0))          # the old single box did not
+
+    def test_fast_rotation_check_matches_the_box_circles(self):
+        frame = self.block(0.55, 0.65, -0.6, -0.1, 0.9, 1.5, 2000)
+        self.assertIsNotNone(self.rm.rotation_hits(frame, self.cfg))
+        far = self.block(1.6, 1.7, -0.6, 0.6, 0.9, 1.5, 2000)
+        self.assertIsNone(self.rm.rotation_hits(far, self.cfg))
+
 
 if __name__ == "__main__":
     unittest.main()
