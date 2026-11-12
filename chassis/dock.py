@@ -259,7 +259,7 @@ LOC_MIN_MATCH = 0.60   # scan-to-map match below this before navigating = locali
 LAT_TOL = 0.010         # the chassis cannot place sideways moves below ~1 cm reliably
 LAT_MAX = 0.08
 STAGING_MARGIN = 0.10  # teach-pose: turning must also be clear this far off the staging spot
-LAT_PLAN_MAX = 0.90   # planned sideways shift from staging to the dock line (staging may be offset to turn)
+LAT_PLAN_MAX = 1.50   # planned sideways shift from staging to the dock line (staging may be offset to turn)
 
 
 def load_st():

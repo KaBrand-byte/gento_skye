@@ -76,9 +76,11 @@ def boxes(cfg, phase='carry'):
     for b in cfg['phases'].get(phase, []):
         z0, z1 = _z(b[4], sz), _z(b[5], sz)
         out.append(('arms', [b[0], b[1], b[2], b[3], z0, z1]))
-        # upper arms / shoulders / elbows beside the torso (the lidar cannot see them well): same width and
-        # heights, from behind the elbows (carry pose: ~0.35 m behind the centre) to where the forearms start
-        out.append(('upper_arms', [cfg.get('elbow_back', -0.38), max(b[0], 0.0), b[2], b[3], z0, max(z1, sz + 0.12)]))
+        # upper arms / shoulders beside the torso (the lidar cannot see them well): same width and heights,
+        # from behind the shoulder axis to where the measured forearms start
+        out.append(('upper_arms', [-0.15, max(b[0], 0.0), b[2], b[3], z0, max(z1, sz + 0.12)]))
+        # elbows behind the shoulders in the carry pose (lidar: x -0.23..-0.34, |y| 0.36..0.47, z 1.31..1.41)
+        out.append(('elbows', [cfg.get('elbow_back', -0.38), -0.15, b[2], b[3], cfg.get('elbow_z0', 1.20), max(z1, sz + 0.12)]))
     return out
 
 
