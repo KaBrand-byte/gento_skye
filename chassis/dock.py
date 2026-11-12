@@ -26,7 +26,8 @@ CFG = RM.load()
 FRONT = 0.338          # chassis centre -> front edge
 GRIP = 0.33            # gripper tip beyond chassis front (worst case)
 MAX_FWD = 1.20          # longest straight approach (checked against the live lidar the whole way)
-ANG_TOL = math.radians(0.5)       # the chassis repeats small turns only to ~+-0.8 deg
+ANG_TOL = math.radians(1.0)       # turns below ~1 deg are not executed at all (dead band); the residual heading
+                                  # is taken into account by lat_error (drive drift)
 YAW_OFF = [0.0]                  # station fine-tune (rad), set from stations.json yaw_offset
 ROT_SHORT = math.radians(0.77)   # measured rotation shortfall of MoveRelative
 FWD_SHORT = 0.011                # measured: straight moves stop ~11 mm short
@@ -760,10 +761,12 @@ elif cmd == 'accept':
         s0.pop('accepted', None); json.dump(st, open(ST_FILE, 'w'), indent=1); log('accepted points of', name, 'cleared')
         raise SystemExit(0)
     ZB[0], ZB[1] = s0['z']; YLIM[0] = 2.5; YAW_OFF[0] = math.radians(float(s0.get('yaw_offset', 0.0)))
-    m = measure(near=True) or measure()                      # near first: also works at the final pose
-    if not m:
-        raise SystemExit('ABORT: no face found ahead')
     target = s0['end_y'] - float(s0.get('lat_offset', 0.0))
+    # far and near fits can find different faces (e.g. a table leg nearby): take the station's face
+    cands = [c for c in (measure(), measure(near=True)) if c]
+    if not cands:
+        raise SystemExit('ABORT: no face found ahead')
+    m = min(cands, key=lambda c: abs(lat_error(c, dict(s0, end_y=target), s0['gap'])))
     dy = lat_error(m, dict(s0, end_y=target), s0['gap']); e = m['err'] + YAW_OFF[0]
     fwd = m['dist'] - FRONT - s0['gap']
     log('face', pub(m), '| sideways %.3f m, heading %.2f deg, forward %.3f m to the final pose' % (dy, math.degrees(e), fwd))
