@@ -19,6 +19,7 @@
 #   run.sh selfscan         measure arms/tray with the lidar and store them (no motion)
 #   run.sh check NAME       what docking at NAME would do from here (no motion)
 #   run.sh log              follow the job log
+#   run.sh relocate         find the pose by matching the lidar scan to the whole map and apply it (no motion)
 DIR=$(cd "$(dirname "$0")" && pwd)
 cd "$DIR" && source env.sh
 LOG=$DIR/run.log; PID=$DIR/run.pid; JS=$DIR/job_status.json
@@ -66,5 +67,6 @@ P
   selfscan) timeout 60 python3 dock.py selfscan --save ;;
   check)    timeout 90 python3 dock.py check "${2:-D}" ;;
   log)      tail -n 30 -f "$LOG" ;;
-  *)        sed -n 2,21p "$0" ;;
+  relocate) timeout 240 python3 locmatch.py global --apply; timeout 60 python3 locmatch.py check | tail -n 1 ;;
+  *)        sed -n 2,22p "$0" ;;
 esac

@@ -21,6 +21,7 @@
 #   task-attach    re-attach to the running task (after a Wi-Fi drop); Ctrl-b d detaches, task keeps running
 #   task-stop      Ctrl-C to the task (stops arms + chassis) and software-stop the chassis
 #   task-check     no motion: task config + SDK version on the Orin
+#   relocate   fix the localisation: match the lidar scan to the whole map, apply the pose  (no motion)
 #   stop       software stop: kill job, cancel moves + tasks, soft manual
 #   log        follow the job log (Ctrl+C to leave; the job keeps running)
 #   web        open the chassis web page (starts the tunnel if needed)
@@ -57,6 +58,7 @@ switch ($Cmd) {
     'task-attach' { ssh -t orin "bash ~/gento_skye/chassis/client/orin_task.sh attach" }
     'task-stop'   { ssh orin "bash ~/gento_skye/chassis/client/orin_task.sh stop" }
     'task-check'  { ssh orin "bash ~/gento_skye/chassis/client/orin_task.sh check" }
+    'relocate' { ssh chassis "$remote relocate" }
     'stop'     { ssh chassis "$remote stop" }
     'log'      { ssh -t chassis "$remote log" }
     'web'      {
@@ -79,5 +81,5 @@ switch ($Cmd) {
         }
         Start-Process 'chrome.exe' 'http://localhost:8080'
     }
-    default    { Get-Content $PSCommandPath -TotalCount 29 | Select-Object -Skip 1 }
+    default    { Get-Content $PSCommandPath -TotalCount 30 | Select-Object -Skip 1 }
 }
