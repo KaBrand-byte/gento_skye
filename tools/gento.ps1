@@ -60,9 +60,23 @@ switch ($Cmd) {
     'stop'     { ssh chassis "$remote stop" }
     'log'      { ssh -t chassis "$remote log" }
     'web'      {
-        $ok = $false
-        try { $ok = (Invoke-WebRequest -UseBasicParsing -TimeoutSec 3 http://localhost:8080/).StatusCode -eq 200 } catch {}
-        if (-not $ok) { Start-Process ssh -ArgumentList '-o ExitOnForwardFailure=yes -o ServerAliveInterval=10 chassis-web' -WindowStyle Minimized; Start-Sleep 4 }
+        # the page comes through an SSH tunnel via the Orin's Wi-Fi; it dies when the Wi-Fi drops -> rebuild it
+        function Test-Web { try { return (Invoke-WebRequest -UseBasicParsing -TimeoutSec 3 http://127.0.0.1:8080/).StatusCode -eq 200 } catch { return $false } }
+        if (-not (Test-Web)) {
+            # a dead tunnel can still hold the local port: end it first
+            Get-NetTCPConnection -LocalPort 8080 -State Listen -ErrorAction SilentlyContinue | ForEach-Object {
+                $p = Get-Process -Id $_.OwningProcess -ErrorAction SilentlyContinue
+                if ($p -and $p.ProcessName -eq 'ssh') { Stop-Process -Id $p.Id -Force }
+            }
+            Write-Host "  starting the tunnel to the chassis web page ..."
+            Start-Process ssh -ArgumentList '-N -o ExitOnForwardFailure=yes -o ServerAliveInterval=10 -o ServerAliveCountMax=3 -o ConnectTimeout=10 chassis-web' -WindowStyle Hidden
+            $ok = $false
+            foreach ($i in 1..15) { Start-Sleep 1; if (Test-Web) { $ok = $true; break } }
+            if (-not $ok) {
+                Write-Host "  web page not reachable: is the PC on the robot Wi-Fi?  test with:  ssh orin echo ok" -ForegroundColor Red
+                exit 1
+            }
+        }
         Start-Process 'chrome.exe' 'http://localhost:8080'
     }
     default    { Get-Content $PSCommandPath -TotalCount 29 | Select-Object -Skip 1 }
