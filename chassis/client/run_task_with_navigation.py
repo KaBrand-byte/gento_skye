@@ -175,13 +175,13 @@ class Trial:
         config = load_config(a.config)
         gaps = {k: v for k, v in ((a.start, a.start_gap), (a.place, a.place_gap)) if v is not None}
         self.nav = GentoNavigation(transport=a.transport, ssh_target=a.ssh_target, gaps=gaps)
-        self.check_arm_start(config)                       # before any motion
         sdk = GentoSDK(config)
         self.sequence = self.make_sequence(sdk, config)
         result = self.sequence.result
         old = {s: signal.signal(s, lambda *_: self.sequence.request_stop()) for s in (signal.SIGINT, signal.SIGTERM)}
         exit_code = 1
         try:
+            self.check_arm_start(config)                    # before any motion
             self.sequence.prepare()                         # arms into the carry (receive) pose, lift 450
             if a.selfscan:
                 logging.info("selfscan: %s", self.nav.selfscan())
