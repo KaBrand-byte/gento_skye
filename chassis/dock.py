@@ -31,6 +31,7 @@ ANG_TOL = math.radians(1.0)       # turns below ~1 deg are not executed at all (
 YAW_OFF = [0.0]                  # station fine-tune (rad), set from stations.json yaw_offset
 ROT_SHORT = math.radians(0.77)   # measured rotation shortfall of MoveRelative
 FWD_SHORT = 0.011                # measured: straight moves stop ~11 mm short
+FWD_SHORT_LAST = 0.005           # measured on the ~0.3 m last stage at D: 11 mm overshot by 3-8 mm
 YLIM = [0.9]
 ZB = [0.10, 0.70]      # height band used for the face fit (override: --z LO HI)
 
@@ -1148,7 +1149,8 @@ elif cmd in ('dock', 'redock'):
             fwd = m['dist'] - FRONT - gap
             log('forward %.3f m (last stage)' % fwd)
             plan_approach(m, st, gap)
-        rel(fwd + FWD_SHORT, 0.0); total += fwd + FWD_SHORT
+        short = FWD_SHORT if fwd > STAGE2 + 0.15 else FWD_SHORT_LAST
+        rel(fwd + short, 0.0); total += fwd + short
         YLIM[0] = 2.5; f = measure(near=True)
         res = dict(name=name, gap_target=gap, gap=f['gap'], ang_deg=f['ang_deg'], lat_err=round(lat_error(f, st, f['gap']), 4), fwd=round(fwd, 4))
         if os.path.exists(os.path.join(REF_DIR, name + '.npy')):
