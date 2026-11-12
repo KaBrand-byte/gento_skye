@@ -25,7 +25,7 @@ CFG = RM.load()
 
 FRONT = 0.338          # chassis centre -> front edge
 GRIP = 0.33            # gripper tip beyond chassis front (worst case)
-MAX_FWD = 0.80
+MAX_FWD = 1.20          # longest straight approach (checked against the live lidar the whole way)
 ANG_TOL = math.radians(0.4)
 YAW_OFF = [0.0]                  # station fine-tune (rad), set from stations.json yaw_offset
 ROT_SHORT = math.radians(0.77)   # measured rotation shortfall of MoveRelative
