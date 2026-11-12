@@ -33,7 +33,9 @@ import sys
 import time
 
 ROOT = Path(__file__).resolve().parents[2]
-LINK_RELEASE_S = 2.0     # the controller refuses a new link (-22) for ~1 s after the previous one was closed
+LINK_RELEASE_S = 2.0
+MAX_LIFT_ASSIST_MM = 60.0  # at most this much of the place descent is done by the lift instead of the arms
+ARM_MARGIN_MM = 10.0       # stay this far inside the arms' planning limit (elbow not near straight)     # the controller refuses a new link (-22) for ~1 s after the previous one was closed
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -106,29 +108,60 @@ class Trial:
         seq._record("awaiting_task_start", status="waiting")
 
     def place_segments(self):
+        """Arm segments of the place motion; the lift part (if any) runs between "down" and "up"."""
         c = self.sequence.config
-        return (("forward", [[c.forward_mm, 0, 0]] * 2, c.forward), ("down", [[0, 0, -c.down_mm]] * 2, c.down),
-                ("up", [[0, 0, c.up_mm]] * 2, c.up), ("back_to_carry", [[-c.forward_mm, 0, 0]] * 2, c.forward))
+        plan = getattr(self, "place_plan", None) or {"arm_down": c.down_mm, "arm_up": c.up_mm, "lift_down": 0.0}
+        return (("forward", [[c.forward_mm, 0, 0]] * 2, c.forward),
+                ("down", [[0, 0, -plan["arm_down"]]] * 2, c.down),
+                ("up", [[0, 0, plan["arm_up"]]] * 2, c.up),
+                ("back_to_carry", [[-c.forward_mm, 0, 0]] * 2, c.forward))
 
-    def preflight_place(self):
-        """Read-only: plan the whole place motion (forward, down, up, back) from the carry pose the arms are in
-        now, BEFORE the tray is handed over - if it cannot be planned, stop here rather than at the place station
-        with the tray held out over the belt."""
-        seq, sdk, c = self.sequence, self._sdk, self.sequence.config
+    def _plans(self, arm_down, arm_up):
+        """Read-only: can forward, down(arm_down), up(arm_up), back be planned from the current arm pose?"""
+        sdk, c = self._sdk, self.sequence.config
         predicted = deepcopy(sdk.read())
-        for name, deltas, motion in self.place_segments():
+        for name, deltas, motion in (("forward", [[c.forward_mm, 0, 0]] * 2, c.forward),
+                                     ("down", [[0, 0, -arm_down]] * 2, c.down), ("up", [[0, 0, arm_up]] * 2, c.up),
+                                     ("back_to_carry", [[-c.forward_mm, 0, 0]] * 2, c.forward)):
             starts = [sdk.forward(i, predicted.joints[i]) for i in range(2)]
             shoulders = sdk.shoulders(predicted)
             targets = [translated(starts[i], local_displacement(shoulders[i], deltas[i])) for i in range(2)]
             try:
                 trajectories = sdk.plan_linear(predicted, starts, targets, motion)
             except Exception as error:
-                raise MotionError(f"放置动作只读规划失败（{name}；前伸 {c.forward_mm}、下降 {c.down_mm}、上移 {c.up_mm} mm）："
-                                  f"{error}。可加参数 --down-mm 130 或 120 再运行") from error
+                return f"{name}: {error}"
             for i, trajectory in enumerate(trajectories):
                 predicted.rt["arms"][i]["fb"]["fb_pos"] = trajectory.endpoint
-        seq.result.metadata["place_motion_mm"] = {"forward": c.forward_mm, "down": c.down_mm, "up": c.up_mm}
-        logging.info("放置动作只读规划通过：前伸 %s、下降 %s、上移 %s mm，再后移回运输位", c.forward_mm, c.down_mm, c.up_mm)
+        return None
+
+    def preflight_place(self):
+        """Read-only, from the carry pose the arms are in now and BEFORE the tray is handed over: plan the whole
+        place motion.  If the configured descent is beyond the arms' reach (measured: forward 100 + down 150
+        straightens the elbow - out of workspace), the arms go down as far as they comfortably can and the LIFT
+        does the rest: the tray ends at the same place, set down instead of dropped."""
+        seq, c = self.sequence, self.sequence.config
+        down, up = float(c.down_mm), float(c.up_mm)
+        why = self._plans(down, up)
+        if why is None:
+            self.place_plan = {"arm_down": down, "arm_up": up, "lift_down": 0.0}
+        else:
+            reach = next((d for d in (down - k for k in range(5, int(MAX_LIFT_ASSIST_MM + ARM_MARGIN_MM) + 1, 5))
+                          if d > 0 and self._plans(d, d) is None), None)
+            if reach is None or down - (reach - ARM_MARGIN_MM) > MAX_LIFT_ASSIST_MM:
+                raise MotionError(f"放置动作只读规划失败（前伸 {c.forward_mm}、下降 {down} mm）：{why}；"
+                                  f"升降最多分担 {MAX_LIFT_ASSIST_MM:.0f} mm 也不够")
+            arm_down = reach - ARM_MARGIN_MM
+            lift_down = down - arm_down
+            if c.receive_lift[0] - lift_down < min(c.ready_lift[0], c.receive_lift[0]) - MAX_LIFT_ASSIST_MM:
+                raise MotionError("升降分担后低于允许范围")
+            self.place_plan = {"arm_down": arm_down, "arm_up": max(0.0, up - lift_down), "lift_down": lift_down}
+            if self._plans(arm_down, self.place_plan["arm_up"]) is not None:
+                raise MotionError(f"放置动作只读规划失败（升降分担 {lift_down:.0f} mm 后仍不可行）")
+            logging.info("下降 %.0f mm 超出双臂可达（%s）：双臂下降 %.0f mm，其余 %.0f mm 由升降完成",
+                         down, why, arm_down, lift_down)
+        seq.result.metadata["place_motion_mm"] = {"forward": c.forward_mm, "down": down, "up": up, **self.place_plan}
+        logging.info("放置动作只读规划通过：前伸 %s，双臂下降 %.0f + 升降 %.0f = %.0f mm，松爪后升降回升、双臂上移 %.0f，再后移回运输位",
+                     c.forward_mm, self.place_plan["arm_down"], self.place_plan["lift_down"], down, self.place_plan["arm_up"])
 
     def place_and_back_to_carry(self):
         """Place with skye_task's own motion steps - forward, down, open, up - then back by the forward distance,
@@ -141,13 +174,18 @@ class Trial:
         if any(feedback.trajectory_states):
             raise MotionError("放置前双臂轨迹尚未空闲")
         seq.started = True
+        lift_down = (getattr(self, "place_plan", None) or {}).get("lift_down", 0.0)
         for name, deltas, motion in self.place_segments():
             seq._move_linear(name, deltas, motion)
             if name == "down":
+                if lift_down:                               # the rest of the descent: the tray is set down
+                    seq._move_lift("place_lift_down", c.receive_lift[0] - lift_down)
                 if self.gripper is not None:
                     seq._gripper_action("release", GripperAction.OPEN)
                 else:
                     seq._record("release", status="skipped", reason="配置关闭夹爪")
+                if lift_down:
+                    seq._move_lift("place_lift_up", c.receive_lift[0])
         feedback = seq.checked_feedback()
         if any(not seq._near(a, t) for a, t in zip(feedback.joints, c.receive)):
             seq._move_joint("carry", c.receive)          # tiny correction if the planner ended a little off

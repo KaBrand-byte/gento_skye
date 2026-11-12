@@ -580,7 +580,7 @@ def translate(dx, dy):
 
 # ---- reference-scan positioning (map stations with a recorded scan): ~1 cm instead of the map's ~10 cm ----
 REF_DIR = os.path.join(HERE, 'refs')
-REF_TOL, REF_ANG = 0.015, math.radians(0.8)
+REF_TOL, REF_ANG = 0.02, math.radians(1.0)   # map stations (handover): the chassis ignores smaller moves anyway
 
 
 def scan2d(p=None):
@@ -681,7 +681,10 @@ def map_approach(name, st, dry):
     """From the safe point: turn in place to the station heading (clear there), translate straight to the
     station, then correct with the map pose until within MAP_TOL / MAP_ANG."""
     turn_to(math.radians(st['pose'][2]))
-    for it in range(2 + MAP_CORRECTIONS):
+    has_ref = os.path.exists(os.path.join(REF_DIR, name + '.npy'))
+    # with a reference scan only the main move uses the map: map corrections near T chase ~10 cm jumps and the
+    # scan match then has to undo them (measured: +9 cm by the map, -8 cm back by the scan)
+    for it in range(2 if has_ref else 2 + MAP_CORRECTIONS):
         dx, dy, da = rel_target(st['pose'])
         log('map approach %d: to go x %.3f y %.3f m, yaw %.2f deg' % (it, dx, dy, math.degrees(da)))
         if math.hypot(dx, dy) <= MAP_TOL and abs(da) <= MAP_ANG:
@@ -697,9 +700,12 @@ def map_approach(name, st, dry):
             rel(0.0, da + math.copysign(min(ROT_SHORT, abs(da) / 2), da))
             continue                            # the frame turned: recompute the translation
         translate(dx, dy)
+        if has_ref:
+            break                               # the scan match does the rest
     else:
-        log('map approach: stopping after %d corrections' % it)
-    if os.path.exists(os.path.join(REF_DIR, name + '.npy')):
+        if not has_ref:
+            log('map approach: stopping after %d corrections' % it)
+    if has_ref:
         # the map is only good to ~10 cm here: finish against the recorded reference scan
         dx, dy, da = ref_approach(name)
         log('FINAL', json.dumps(dict(name=name, mode='map+ref', err_x=round(dx, 4), err_y=round(dy, 4),
@@ -1107,6 +1113,41 @@ elif cmd in ('dock', 'redock'):
                    'sideways move to the taught position')
     else:
         plan_approach(m, st, gap)                              # stops here if the taught approach is blocked
+    if os.path.exists(os.path.join(REF_DIR, name + '.npy')) and not dry and '--lineup' not in sys.argv:
+        # Fast path with a reference scan: ONE diagonal move (sideways + forward together) to STAGE2 before the
+        # final pose, re-measure, then ONE diagonal last move carrying the sideways correction from the scan
+        # match (on its own the chassis ignores sideways moves below ~2 cm - measured at D)
+        dy = lat_error(m, st, gap); fwd = m['dist'] - FRONT - gap; total = 0.0
+        if fwd < 0 or fwd > MAX_FWD:
+            raise SystemExit('ABORT: forward %.3f out of range' % fwd)
+        if fwd > STAGE2 + 0.15:
+            first = fwd - STAGE2
+            need_clear(RM.sweep_hits(accepted_filter(RM.remove_self(cloud(), CFG), st, fwd, dy), CFG, first, dy),
+                       'diagonal approach')
+            log('diagonal approach: forward %.3f m, sideways %.3f m' % (first, dy))
+            rel(first + FWD_SHORT, 0.0, y=dy); total += first + FWD_SHORT
+            m = measure_station(st, gap, m['dist'] - first)
+            log('  stage 2 measure', pub(m))
+            plan_approach(m, st, gap)
+        rx, ry, ra = ref_offset(name)
+        if abs(ra) > math.radians(1.0):
+            need_clear(RM.turn_hits(accepted_filter(RM.remove_self(cloud(), CFG), st, rx, ry), CFG, ra), 'heading correction')
+            rel(0.0, ra)
+            m = measure_station(st, gap, m['dist']); rx, ry, ra = ref_offset(name)
+        fwd = m['dist'] - FRONT - gap
+        need_clear(RM.sweep_hits(accepted_filter(RM.remove_self(cloud(), CFG), st, fwd, ry), CFG, fwd, ry), 'last stage')
+        log('last stage: forward %.3f m, sideways %.3f m' % (fwd, ry))
+        rel(fwd + FWD_SHORT_LAST, 0.0, y=ry); total += fwd + FWD_SHORT_LAST
+        YLIM[0] = 2.5; f = measure(near=True)
+        res = dict(name=name, gap_target=gap, gap=f['gap'] if f else None, ang_deg=f['ang_deg'] if f else None, fwd=round(fwd, 4))
+        try:
+            rx, ry, ra = ref_offset(name)
+            res.update(ref_err_x=round(rx, 4), ref_err_y=round(ry, 4), ref_err_yaw_deg=round(math.degrees(ra), 2))
+        except SystemExit as e:
+            res.update(ref_err=str(e))
+        log('FINAL', json.dumps(res))
+        json.dump(dict(fwd=total, gap=gap, t=time.time()), open('/tmp/claude_dock_last.json', 'w'))
+        raise SystemExit(0)
     m = align_lateral(m, st, gap, dry)
     m = align_heading(m, dry)
     m = align_lateral(m, st, gap, dry)                         # again: the drift term depends on the final heading

@@ -179,6 +179,27 @@ class RunnerTests(unittest.TestCase):
         down = [s for s in report["steps"] if s["name"] == "down_target"][0]
         self.assertEqual(down["robot_displacements_mm"], [[0, 0, -120], [0, 0, -120]])
 
+    def test_descent_beyond_the_arms_reach_is_finished_by_the_lift(self):
+        orig = Device.plan_linear
+
+        def limited(dev, feedback, starts, targets, motion):          # like the real arm: no deep reach
+            if max(abs(targets[a][i][3] - starts[a][i][3]) for a in range(2) for i in range(3)) > 140:
+                raise runner.MotionError("Target is out of workspace")
+            return orig(dev, feedback, starts, targets, motion)
+        with mock.patch.object(Device, "plan_linear", limited):
+            code, report = self.run_trial(extra=["--down-mm", "150"])
+        self.assertEqual(code, 0)
+        plan = report["metadata"]["place_motion_mm"]
+        self.assertEqual(plan["down"], 150)
+        self.assertEqual(plan["arm_down"] + plan["lift_down"], 150)
+        self.assertGreater(plan["lift_down"], 0)
+        names = list(dict.fromkeys(s["name"] for s in report["steps"]))
+        i = names.index
+        self.assertLess(i("down"), i("place_lift_down"))
+        self.assertLess(i("place_lift_down"), i("release"))
+        self.assertLess(i("release"), i("place_lift_up"))
+        self.assertLess(i("place_lift_up"), i("up"))
+
     def test_no_return(self):
         code, report = self.run_trial(extra=["--no-return"])
         self.assertEqual(code, 0)
