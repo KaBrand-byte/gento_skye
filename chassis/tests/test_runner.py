@@ -3,6 +3,7 @@
 Run from the repository root:  python3 -m unittest discover -s chassis/tests -v
 """
 
+from dataclasses import dataclass
 import json
 from pathlib import Path
 import sys
@@ -57,12 +58,56 @@ class FakeNav:
         pass
 
 
+@dataclass
+class FakeGripperConfig:
+    def action_positions(self, action, side):
+        return {"left": 0.0 if action == "open" else 0.94, "right": 0.0 if action == "open" else 0.94}
+
+
+class FakeGripper:
+    """Records gripper actions into the same log as the navigation calls (order matters)."""
+    worker_running = False
+
+    def __init__(self):
+        self.config = FakeGripperConfig()
+
+    def reserve(self):
+        pass
+
+    def connect(self):
+        pass
+
+    def control(self, target, action, checkpoint=lambda: None):
+        checkpoint()
+        FakeNav.log.append(("grip", getattr(action, "value", action)))
+        return {}
+
+    def check_health(self):
+        pass
+
+    def freeze(self):
+        FakeNav.log.append(("grip", "freeze"))
+
+    def snapshot(self):
+        return {}
+
+    def close(self):
+        pass
+
+
+def make_sequence_with_fake_gripper(self, sdk, config, label=""):
+    self.gripper, self._sdk = FakeGripper(), sdk
+    return runner.Sequence(sdk, config, gripper=self.gripper)
+
+
 class RunnerTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.cfg = Path(self.tmp.name) / "fast.json"
         self.cfg.write_text(json.dumps({"stable_seconds": 0.04, "start_timeout_seconds": 0.15,
-                                        "execution_timeout_seconds": 0.5, "poll_seconds": 0.02}))
+                                        "execution_timeout_seconds": 0.5, "poll_seconds": 0.02,
+                                        "gripper_enabled": False, "handover_wait_seconds": 0.05,
+                                        "gripper_wait_seconds": 0.05}))
         self.result = Path(self.tmp.name) / "result.json"
         FakeNav.log = []
 
@@ -89,6 +134,18 @@ class RunnerTests(unittest.TestCase):
         self.assertLess(names.index("receive_lift"), names.index("forward"))   # carry pose held while driving
         back = [s["name"] for s in report["metadata"]["return_steps"]]
         self.assertEqual(back[-2:], ["handover_and_close", "awaiting_task_start"])   # carry pose again before driving back
+
+    def test_grippers_close_at_the_start_station_before_driving_to_the_place_station(self):
+        data = json.loads(self.cfg.read_text()); data["gripper_enabled"] = True
+        self.cfg.write_text(json.dumps(data))
+        with mock.patch.object(runner.Trial, "make_sequence", make_sequence_with_fake_gripper):
+            code, report = self.run_trial()
+        self.assertEqual(code, 0)
+        self.assertEqual(report["status"], "completed")
+        events = [e for e in FakeNav.log if e[0] in ("grip", "start")]
+        self.assertEqual(events, [("grip", "open"), ("start", "T"), ("grip", "close"), ("start", "D"),
+                                  ("grip", "close"), ("grip", "open"), ("start", "undock"),
+                                  ("grip", "open"), ("start", "T")])
 
     def test_no_return(self):
         code, report = self.run_trial(extra=["--no-return"])

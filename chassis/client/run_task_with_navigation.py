@@ -1,12 +1,13 @@
 """Full trial: skye_task arm sequence + chassis navigation, WITHOUT modifying skye_task.
 
 Order (run from the repository root on the machine that runs skye_task, ROS env loaded):
-  1. skye_task Sequence.prepare()      arms -> ready (lift 500) -> receive/carry pose (lift 450)
+  1. skye_task Sequence.prepare()      arms -> ready -> grippers open -> transition -> receive/carry pose
+                                       (lift heights from the config)
   2. [--selfscan]                      lidar measures arms (+tray) on the chassis (needs ~1 m free in front)
-  3. navigate to the start station     (default T, the table)                     <- chassis moves
-  4. handover                          press Enter (grippers not integrated yet: unloaded run)
+  3. navigate to the start station     (default T, the handover point)            <- chassis moves
+  4. handover                          press Enter: the grippers close (and stay checked while driving)
   5. navigate to the place station     (default D, the conveyor)                  <- chassis moves
-  6. skye_task Sequence.start()        forward 100 mm, down 100 mm, hands out, back to ready
+  6. skye_task Sequence.start()        (close again: no-op), forward, down, open, up, transition, ready
   7. return (unless --no-return)       reverse straight out of the place station   <- chassis moves
                                        a fresh Sequence.prepare(): arms back to the carry (receive) pose
                                        navigate to the start station again, ready for the next tray
@@ -34,6 +35,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from gento_navigation import GentoNavigation, NavigationError  # noqa: E402
 from skye_task.__main__ import wait_for_start, write_report  # noqa: E402
 from skye_task.config import load_config  # noqa: E402
+from skye_task.interfaces import GripperAction, GripperTarget  # noqa: E402
 from skye_task.sdk import GentoSDK, MotionError  # noqa: E402
 from skye_task.sequence import Result, Sequence  # noqa: E402
 
@@ -45,6 +47,53 @@ class Trial:
         self.navigating = False
         self.nav = None
         self.sequence = None
+        self.gripper = None
+        self._sdk = None
+
+    def make_sequence(self, sdk, config, label=""):
+        """His Sequence with the grippers driven the same way skye_task's own `run` does."""
+        self.gripper = None
+        if config.gripper_enabled:
+            from skye_task.dm_gripper import load_gripper_config
+            from skye_task.task_gripper import TaskGripper
+            self.gripper = TaskGripper(sdk, load_gripper_config(self.args.gripper_config))
+        self._sdk = sdk
+        return Sequence(sdk, config, gripper=self.gripper,
+                        on_event=lambda name, detail: logging.info("%s%s %s", label, name, detail))
+
+    def close_grippers(self):
+        """Handover at the start station: close both grippers now, so the tray is held while driving (his
+        start() closes them again at the place station, which is then a no-op)."""
+        seq, gripper = self.sequence, self.gripper
+        if gripper is None:
+            return
+        logging.info("交接：双爪闭合")
+        gripper.control(GripperTarget.BOTH, GripperAction.CLOSE, seq.checked_feedback)
+        until = time.monotonic() + seq.config.handover_wait_seconds
+        while time.monotonic() < until:
+            seq.checked_feedback()
+            time.sleep(seq.config.poll_seconds)
+        logging.info("双爪已闭合，托盘已交接")
+
+    def release_hardware(self):
+        """Gripper worker first, then the arm SDK link (same order as skye_task's run)."""
+        gripper, sdk, self.gripper, self._sdk = self.gripper, self._sdk, None, None
+        sdk_can_close = True
+        if gripper is not None:
+            try:
+                self.sequence.result.metadata.setdefault("gripper_final", gripper.snapshot())
+            except Exception as error:
+                logging.error("夹爪状态读取失败: %s", error)
+            try:
+                gripper.close()
+            except Exception as error:
+                logging.error("夹爪资源释放失败: %s", error)
+            sdk_can_close = not gripper.worker_running
+        if sdk is not None and sdk_can_close:
+            try:
+                sdk.close()
+            except Exception as error:
+                logging.error("SDK 资源释放失败: %s", error)
 
     def navigate(self, destination, undock=False):
         """Drive to `destination` (or reverse out with undock=True); keep checking the arms; return only after
@@ -87,13 +136,10 @@ class Trial:
         """After placing: reverse out along the approach (arms are in the ready pose), arms back to the carry
         (receive) pose with a fresh SDK link + Sequence (a Sequence runs once), dock at the start station again."""
         self.navigate("undock", undock=True)
-        try:
-            sdk.close()
-        except Exception as error:
-            logging.warning("SDK 资源释放失败: %s", error)
-        sdk = GentoSDK(config)
         placed = self.sequence
-        self.sequence = Sequence(sdk, config, on_event=lambda name, detail: logging.info("return %s %s", name, detail))
+        self.release_hardware()
+        sdk = GentoSDK(config)
+        self.sequence = self.make_sequence(sdk, config, "return ")
         try:
             self.sequence.prepare()
             self.navigate(self.args.start)
@@ -103,8 +149,7 @@ class Trial:
             raise
         finally:
             placed.result.metadata["return_steps"] = self.sequence.result.steps
-            self.sequence = placed
-            self._sdk = sdk
+            self.return_sequence, self.sequence = self.sequence, placed
         return sdk
 
     def run(self):
@@ -113,7 +158,7 @@ class Trial:
         gaps = {k: v for k, v in ((a.start, a.start_gap), (a.place, a.place_gap)) if v is not None}
         self.nav = GentoNavigation(transport=a.transport, ssh_target=a.ssh_target, gaps=gaps)
         sdk = GentoSDK(config)
-        self.sequence = Sequence(sdk, config, on_event=lambda name, detail: logging.info("%s %s", name, detail))
+        self.sequence = self.make_sequence(sdk, config)
         result = self.sequence.result
         old = {s: signal.signal(s, lambda *_: self.sequence.request_stop()) for s in (signal.SIGINT, signal.SIGTERM)}
         exit_code = 1
@@ -123,8 +168,9 @@ class Trial:
                 logging.info("selfscan: %s", self.nav.selfscan())
             if a.start:
                 self.navigate(a.start)
-            print("已在起始点。交接托盘后按 Enter 出发去放置点（夹爪未接入：空载），Ctrl-C 停止。", flush=True)
+            print("已在起始点。放好托盘后按 Enter：双爪闭合，然后出发去放置点；Ctrl-C 停止。", flush=True)
             wait_for_start(self.sequence)
+            self.close_grippers()
             self.navigate(a.place)
             self.sequence.start()                           # forward, down, hands out, back to ready
             if a.start and not a.no_return:
@@ -145,10 +191,7 @@ class Trial:
                     leg["status"] = "stopped" if isinstance(error, KeyboardInterrupt) or "停止" in str(error) else "failed"
             exit_code = 130 if result.status == "stopped" or isinstance(error, KeyboardInterrupt) else 1
         finally:
-            try:
-                getattr(self, "_sdk", sdk).close()
-            except Exception as error:
-                logging.error("SDK 资源释放失败: %s", error)
+            self.release_hardware()
             try:
                 self.nav.close()
             except Exception:
@@ -177,6 +220,8 @@ def main(argv=None):
     p.add_argument("--place-gap", type=float, help="放置站点间隙 m（默认用站点配置）")
     p.add_argument("--transport", choices=("ros", "ssh"), default="ros")
     p.add_argument("--ssh-target", default="chassis")
+    p.add_argument("--gripper-config", type=Path, default=ROOT / "config" / "gripper-can.json",
+                   help="夹爪配置（与 skye_task run 相同）")
     p.add_argument("--no-return", action="store_true", help="放置后不返回起始点")
     p.add_argument("--selfscan", action="store_true", help="准备完成后先测手臂／托盘占位（车前约 1 m 需无物体）")
     p.add_argument("--nav-timeout", type=float, default=600.0)
