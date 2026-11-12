@@ -427,6 +427,82 @@ def turn_to(h):
         safe_rotate(d + math.copysign(ROT_SHORT, d))
 
 
+# ---- map-positioned stations (mode "map"): no edge to dock against; the final pose comes from the map ----
+MAP_TOL = 0.02                  # m: map localisation noise is ~1-2 cm, sideways moves below ~1 cm are unreliable
+MAP_ANG = math.radians(1.0)
+MAP_MAX_MOVE = 2.5              # m: longest straight translation from the safe point to the station
+
+
+def rel_target(pose_deg):
+    """(dx, dy, dyaw) from the current map pose to a map pose [x, y, yaw_deg], in the robot frame."""
+    spin(0.6)                                   # let the localisation catch up after a move
+    x, y, yaw = map_pose(); tx, ty, th = pose_deg; th = math.radians(th)
+    c, s = math.cos(yaw), math.sin(yaw); wx, wy = tx - x, ty - y
+    return c * wx + s * wy, -s * wx + c * wy, (th - yaw + math.pi) % (2 * math.pi) - math.pi
+
+
+def translate(dx, dy):
+    """Straight translation without turning by (dx, dy) in the robot frame: one diagonal move, or sideways then
+    forward, or forward then sideways - the first whose swept volume is clear in the live cloud."""
+    p = cloud()
+    paths = [[(dx, dy)], [(0.0, dy), (dx, 0.0)], [(dx, 0.0), (0.0, dy)]]
+    for path in paths:
+        q, ok = p, True
+        for mx, my in path:
+            if (abs(mx) > 1e-3 or abs(my) > 1e-3) and RM.sweep_hits(q, CFG, mx, my):
+                ok = False; break
+            q = q - np.array([mx, my, 0.0])
+        if ok:
+            for mx, my in path:
+                if abs(mx) > 0.005 or abs(my) > 0.005:
+                    rel(mx + (math.copysign(FWD_SHORT, mx) if abs(mx) > 0.05 else 0.0), 0.0, rear_check=mx < 0, y=my)
+            return
+    raise SystemExit('ABORT: no clear straight path to the station (x %.2f, y %.2f): %s'
+                     % (dx, dy, json.dumps(RM.sweep_hits(p, CFG, dx, dy))))
+
+
+def map_approach(name, st, dry):
+    """From the safe point: turn in place to the station heading (clear there), translate straight to the
+    station, then correct with the map pose until within MAP_TOL / MAP_ANG."""
+    turn_to(math.radians(st['pose'][2]))
+    for it in range(6):
+        dx, dy, da = rel_target(st['pose'])
+        log('map approach %d: to go x %.3f y %.3f m, yaw %.2f deg' % (it, dx, dy, math.degrees(da)))
+        if math.hypot(dx, dy) <= MAP_TOL and abs(da) <= MAP_ANG:
+            break
+        if math.hypot(dx, dy) > MAP_MAX_MOVE:
+            raise SystemExit('ABORT: station %.2f m away from the safe point (check localisation)' % math.hypot(dx, dy))
+        if dry:
+            log('  (dry) path clear:', not RM.sweep_hits(cloud(), CFG, dx, dy)); return
+        if abs(da) > MAP_ANG:
+            if abs(da) > math.radians(12):
+                raise SystemExit('ABORT: heading %.1f deg off before translating' % math.degrees(da))
+            need_clear(RM.turn_hits(cloud(), CFG, da), 'heading correction')
+            rel(0.0, da + math.copysign(min(ROT_SHORT, abs(da) / 2), da))
+            continue                            # the frame turned: recompute the translation
+        translate(dx, dy)
+    else:
+        log('map approach: stopping after %d corrections' % it)
+    dx, dy, da = rel_target(st['pose'])
+    log('FINAL', json.dumps(dict(name=name, mode='map', err_x=round(dx, 4), err_y=round(dy, 4),
+                                 err_yaw_deg=round(math.degrees(da), 2), pose=[round(v, 3) for v in map_pose()[:2]])))
+
+
+def leave_map_station():
+    """At a map station (robot within 0.3 m / 20 deg of its pose): go back to its safe point the way the docking
+    came in (straight translation), so the next navigation starts where turning is clear."""
+    for nm, st in load_st().items():
+        if st.get('mode') != 'map' or 'staging_pose' not in st:
+            continue
+        dx, dy, da = rel_target(st['pose'])
+        if math.hypot(dx, dy) < 0.3 and abs(da) < math.radians(20):
+            sx, sy, _ = rel_target(st['staging_pose'])
+            log('at map station %s: back to its safe point first (x %.2f, y %.2f)' % (nm, sx, sy))
+            translate(sx, sy)
+            return True
+    return False
+
+
 def cancel_all_tasks():
     from server.srv import CancelAllTask
     c = n.create_client(CancelAllTask, 'server/CancelAllTask')
@@ -524,6 +600,12 @@ elif cmd == 'teach-pose':
     assert side in ('left', 'right'), 'SIDE must be left or right'
     ZB[0], ZB[1] = old.get('z', ZB)
     check_localisation()                                      # the staging pose is stored in map coordinates
+    if old.get('mode') == 'map':
+        # map station: only the map pose matters; its safe point (teach-staging) is kept
+        x, y, yaw = map_pose()
+        old.update(pose=[round(x, 3), round(y, 3), round(math.degrees(yaw), 2)], taught=time.strftime('%Y-%m-%d %H:%M:%S'))
+        st[name] = old; json.dump(st, open(ST_FILE, 'w'), indent=1)
+        log('taught', name, '(map station)', json.dumps(old)); raise SystemExit(0)
     m = measure(near=True)
     if not m:
         raise SystemExit('ABORT: no face found ahead (z band %.2f-%.2f m)' % tuple(ZB))
@@ -571,6 +653,27 @@ elif cmd == 'teach-pose':
     for t in notes:
         log('NOTE:', t)
     log('taught', name, json.dumps(st[name]))
+elif cmd == 'teach-staging':
+    # teach-staging NAME [map] : NO MOTION.  The robot stands at a safe point near station NAME (room to turn
+    # with the arms + tray).  Records the current map pose as NAME's staging point; with "map" the station is
+    # docked by map position: navigate here, turn to the station heading, translate straight to its pose.
+    name = args[0]; st = load_st()
+    if name not in st or 'pose' not in st[name]:
+        raise SystemExit('ABORT: teach the final pose of %s first (teach-pose)' % name)
+    check_localisation()
+    h = RM.rotation_hits(cloud(fresh=True), CFG)
+    if h:
+        raise SystemExit('ABORT: the arms cannot turn in place here: %s - choose a spot with more room' % json.dumps(h))
+    x, y, yaw = map_pose(); s0 = st[name]
+    s0.update(staging_pose=[round(x, 3), round(y, 3), round(math.degrees(yaw), 2)])
+    for k in ('no_staging', 'back', 'staging_right', 'staging_xy'):
+        s0.pop(k, None)
+    if 'map' in args[1:]:
+        s0['mode'] = 'map'
+    dx, dy, da = rel_target(s0['pose'])
+    json.dump(st, open(ST_FILE, 'w'), indent=1)
+    log('safe point of %s: (%.3f, %.3f); the station is %.2f m away; mode %s' % (name, x, y, math.hypot(dx, dy), s0.get('mode', 'face')))
+    log('taught', name, json.dumps(s0))
 elif cmd == 'restage':
     # restage NAME [BACK] : NO MOTION.  Recompute the staging spot of a station taught with teach-pose, from
     # the current scan (robot anywhere near the station, localisation good), e.g. after the robot model changed.
@@ -595,7 +698,7 @@ elif cmd in ('dock', 'redock'):
     name = args[0]; st = load_st()[name]; gap = float(args[1]) if len(args) > 1 else st['gap']; YLIM[0] = 2.5
     ZB[0], ZB[1] = st['z']
     # fine-tune: lat_offset (m, + = robot further left) shifts the lateral target; yaw_offset (deg, + = left)
-    st['end_y'] = st['end_y'] - float(st.get('lat_offset', 0.0)); YAW_OFF[0] = math.radians(float(st.get('yaw_offset', 0.0)))
+    st['end_y'] = st.get('end_y', 0.0) - float(st.get('lat_offset', 0.0)); YAW_OFF[0] = math.radians(float(st.get('yaw_offset', 0.0)))
     if st.get('no_staging') and cmd == 'dock':
         raise SystemExit('ABORT: station %s has no staging spot where the arms can turn in place - move what is in '
                          'the way and run restage %s, or teach the station somewhere with more room' % (name, name))
@@ -613,6 +716,8 @@ elif cmd in ('dock', 'redock'):
         if not S[0].is_hard_auto:
             raise SystemExit('ABORT: hard switch is on MANUAL - switch it to AUTO first')
         check_localisation()
+        if '--leave' in sys.argv:
+            leave_map_station()                 # at a map station: back to its safe point first
         if RM.rotation_hits(cloud(), CFG):
             if '--leave' not in sys.argv:
                 need_clear(RM.rotation_hits(cloud(), CFG), 'turning at the start position (navigation turns in place '
@@ -633,6 +738,10 @@ elif cmd in ('dock', 'redock'):
             x, y, _ = map_pose(); dd = math.hypot(x - sxy[0], y - sxy[1])
             if dd > STAGING_TOL + 0.05:
                 raise SystemExit('ABORT: navigation ended %.2f m from the staging point (task cancelled or failed?)' % dd)
+        if st.get('mode') == 'map':
+            map_approach(name, st, dry)
+            setmode(0)
+            raise SystemExit(0)
         if 'staging_pose' in st:   # pose tasks keep the start heading: turn to the face here (staging is clear all round)
             turn_to(math.radians(st['staging_pose'][2]))
     m = measure() or measure(near=True)          # near: staging spots right beside the final pose

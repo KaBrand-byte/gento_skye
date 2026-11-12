@@ -13,6 +13,8 @@
 #   teach-pose NAME [BACK] [left|right]   NO MOTION: robot stands EXACTLY at the final pose of NAME (driven
 #                         there by hand, arms in carry pose): records gap + heading + lateral position to the
 #                         face, and a staging pose BACK m (default 0.5) straight behind it
+#   teach-staging NAME [map]  NO MOTION: robot at a safe point near NAME (room to turn): record it as NAME's
+#                         staging point; map = dock NAME by map position (turn there, translate straight in)
 #   restage NAME          NO MOTION: recompute the staging spot of a taught station from here (robot near it)
 #   undock                DRIVE: reverse straight out along the last docking approach              (asks y/n)
 #   job        job status JSON (what the skye_task adapter reads)
@@ -52,6 +54,7 @@ switch ($Cmd) {
     'goto'     { Confirm-Motion "dock at station $Arg"; ssh -t chassis "$remote goto $Arg $($Rest -join ' ') && $remote follow" }
     'tune'     { ssh chassis "$remote tune $Arg $($Rest -join ' ')" }
     'teach-pose' { ssh chassis "$remote teach-pose $Arg $($Rest -join ' ')" }
+    'teach-staging' { ssh chassis "$remote teach-staging $Arg $($Rest -join ' ')" }
     'restage'  { ssh chassis "$remote restage $Arg $($Rest -join ' ')" }
     'undock'   { Confirm-Motion "reverse straight out of the last docking"; ssh -t chassis "$remote undock && $remote follow" }
     'teach'    { Confirm-Motion "teach station $Arg at the current lateral position (turns a little)"; ssh chassis "$remote teach $Arg" }
@@ -84,5 +87,5 @@ switch ($Cmd) {
         }
         Start-Process 'chrome.exe' 'http://localhost:8080'
     }
-    default    { Get-Content $PSCommandPath -TotalCount 32 | Select-Object -Skip 1 }
+    default    { Get-Content $PSCommandPath -TotalCount 34 | Select-Object -Skip 1 }
 }
