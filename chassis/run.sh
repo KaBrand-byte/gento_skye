@@ -17,7 +17,7 @@
 #                           lateral position relative to the face, and a staging pose BACK m (0.5) behind it
 #   run.sh teach-staging NAME [map]  NO MOTION: robot at a safe point (room to turn) near NAME: record it as NAME's
 #                           staging point; "map": dock NAME by map position (turn here, translate straight to it)
-#   run.sh accept NAME [clear]  NO MOTION: robot lined up on NAME's approach line: record the structure the model
+#   run.sh accept NAME [clear]  NO MOTION: robot lined up on NAME's approach line (>= 0.25 m before it): record what the model
 #                           touches there as verified-clear (on site); docking ignores exactly those points
 #   run.sh restage NAME [BACK]  NO MOTION: recompute the staging spot of a taught station from the current scan
 #   run.sh undock [MIN]     reverse straight out along the last docking approach (>= MIN m, 0.30)    (MOVES)

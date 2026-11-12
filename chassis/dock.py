@@ -732,7 +732,7 @@ elif cmd == 'accept':
         s0.pop('accepted', None); json.dump(st, open(ST_FILE, 'w'), indent=1); log('accepted points of', name, 'cleared')
         raise SystemExit(0)
     ZB[0], ZB[1] = s0['z']; YLIM[0] = 2.5; YAW_OFF[0] = math.radians(float(s0.get('yaw_offset', 0.0)))
-    m = measure() or measure(near=True)
+    m = measure(near=True) or measure()                      # near first: also works at the final pose
     if not m:
         raise SystemExit('ABORT: no face found ahead')
     target = s0['end_y'] - float(s0.get('lat_offset', 0.0))
@@ -741,6 +741,9 @@ elif cmd == 'accept':
     log('face', pub(m), '| sideways %.3f m, heading %.2f deg, forward %.3f m to the final pose' % (dy, math.degrees(e), fwd))
     if abs(dy) > 0.03 or abs(e) > math.radians(1.5) or not -0.02 <= fwd <= MAX_FWD:
         raise SystemExit('ABORT: not lined up on the approach line of %s - run goto (it lines up before driving in)' % name)
+    if fwd < 0.25:
+        raise SystemExit('ABORT: too close to the final pose (%.2f m): structure inside the arm model here looks like '
+                         'the robot itself - run accept where goto lines up before driving in' % fwd)
     p = RM.remove_self(cloud(), CFG); sz = RM.surface_height(p, m['dist'])
     p = p - np.array([0.0, dy, 0.0])
     q = p[model_hits_mask(p, max(fwd, 0.0), sz, s0.get('place'))] - np.array([max(fwd, 0.0), 0.0, 0.0])
