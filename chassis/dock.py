@@ -463,6 +463,56 @@ elif cmd == 'teach':
     for k in ('untaught', 'lat_offset', 'yaw_offset', 'note'):       # a fresh teach replaces old fine-tunes
         st[name].pop(k, None)
     json.dump(st, open(ST_FILE, 'w'), indent=1); log('taught', name, json.dumps(st[name]))
+elif cmd == 'teach-pose':
+    # teach-pose NAME [BACK] [SIDE] : the robot stands EXACTLY at the final pose (driven there by hand, arms in
+    # the carry pose).  NO MOTION.  Records that pose relative to the face - distance (gap), heading relative to
+    # square (yaw_offset) and the lateral position of the face end (end_y) - plus a staging pose BACK m straight
+    # behind it on the map, so docking = navigate there, then reproduce the recorded lidar-relative pose.
+    name = args[0]; back = float(args[1]) if len(args) > 1 else 0.5; YLIM[0] = 2.5
+    st = load_st(); old = st.get(name, {})
+    side = args[2] if len(args) > 2 else old.get('side', 'left')
+    assert side in ('left', 'right'), 'SIDE must be left or right'
+    ZB[0], ZB[1] = old.get('z', ZB)
+    check_localisation()                                      # the staging pose is stored in map coordinates
+    m = measure(near=True)
+    if not m:
+        raise SystemExit('ABORT: no face found ahead (z band %.2f-%.2f m)' % tuple(ZB))
+    log('face at the final pose', pub(m))
+    if m['dist'] + back < FRONT + GRIP + 0.10 or m['dist'] + back > 2.1 or not 0.25 <= back <= MAX_FWD:
+        raise SystemExit('ABORT: BACK %.2f m gives a staging distance of %.2f m to the face (need 0.77-2.1, BACK 0.25-%.2f)'
+                         % (back, m['dist'] + back, MAX_FWD))
+    ey = end_y(m, side)
+    if abs(ey) > YLIM[0] - 0.15:
+        log('WARNING: the %s end of the face is at y=%.2f m, near the edge of the view - consider SIDE %s'
+            % (side, ey, 'right' if side == 'left' else 'left'))
+    x, y, yaw = map_pose()
+    p = RM.remove_self(cloud(), CFG)
+    notes = []
+    here = RM.max_forward(p, CFG, 0.0)
+    if here is None:
+        notes.append('the robot model already touches something here (%s): docking with --closest stops '
+                     'a little short of this pose' % json.dumps(RM.sweep_hits(p, CFG, 0.0, 0.0)))
+    if old.get('place'):
+        sz = RM.surface_height(p, m['dist'])
+        h = RM.place_motion_hits(p, CFG, 0.0, sz) if sz is not None else {'what': 'surface not seen'}
+        if h:
+            notes.append('place motion from here would hit %s' % json.dumps(h))
+    stg = p + np.array([back, 0.0, 0.0])                      # the cloud as seen from the staging pose
+    if RM.rotation_hits(stg, CFG):
+        notes.append('turning at the staging pose is not clear (%s): docking backs off first; a larger BACK '
+                     'avoids that' % json.dumps(RM.rotation_hits(stg, CFG)))
+    st[name] = dict(old, side=side, gap=round(m['gap'], 4), end_y=round(ey, 4),
+                    yaw_offset=round(-m['ang_deg'], 2), z=list(ZB),
+                    staging_pose=[round(x - back * math.cos(yaw), 3), round(y - back * math.sin(yaw), 3),
+                                  round(math.degrees(yaw), 2)],
+                    pose=[round(x, 3), round(y, 3), round(math.degrees(yaw), 2)], back=back,
+                    taught=time.strftime('%Y-%m-%d %H:%M:%S'))
+    for k in ('untaught', 'lat_offset', 'note', 'staging_xy'):  # fresh teach: no old fine-tunes / references
+        st[name].pop(k, None)
+    json.dump(st, open(ST_FILE, 'w'), indent=1)
+    for t in notes:
+        log('NOTE:', t)
+    log('taught', name, json.dumps(st[name]))
 elif cmd in ('dock', 'redock'):
     # dock NAME [GAP]: navigate to staging (unless redock), align heading, lateral, heading, straight in
     name = args[0]; st = load_st()[name]; gap = float(args[1]) if len(args) > 1 else st['gap']; YLIM[0] = 2.5
@@ -594,8 +644,13 @@ elif cmd in ('dock', 'redock'):
                 fh.write('time,name,gap_target,gap,ang_deg,lat_err,fwd' + chr(10))
             fh.write('%s,%s,%.3f,%.4f,%.2f,%.4f,%.4f' %  (time.strftime('%H:%M:%S'), name, gap, f['gap'], f['ang_deg'], res['lat_err'], fwd) + chr(10))
 elif cmd == 'undock':
-    d = json.load(open('/tmp/claude_dock_last.json'))['fwd']; assert 0 < d <= MAX_FWD + 0.05
+    # undock [MIN] : reverse straight out along the last docking approach (at least MIN m, default 0.30)
+    d = json.load(open('/tmp/claude_dock_last.json'))['fwd']; assert 0 <= d <= MAX_FWD + 0.05
+    d = max(d, float(args[0]) if args else 0.30)
+    pb = cloud(); pb = pb[pb[:, 0] < -0.30]                  # only what is behind: the arms may be in any pose
+    need_clear(RM.sweep_hits(pb, CFG, -d, 0.0), 'reversing out')
     rel(-d, 0.0, rear_check=True); setmode(0)
+    log('FINAL', json.dumps(dict(name='undock', back=round(d, 4))))
 elif cmd == 'over':
     # over [XMAX]: list everything above 0.75 m in front (body frame) in 10 cm cells
     xm = float(args[0]) if args else 2.0; a = cloud()

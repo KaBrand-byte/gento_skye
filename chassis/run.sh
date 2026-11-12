@@ -12,6 +12,10 @@
 #   run.sh tune NAME KEY V  fine-tune a station: gap (m) | lat_offset (m, + = robot further left) | yaw_offset (deg, + = left)
 #   run.sh teach NAME       record the CURRENT lateral position as station NAME (robot at its staging point,
 #                           facing the edge; turns a little to square up)                             (MOVES a little)
+#   run.sh teach-pose NAME [BACK] [left|right]   NO MOTION: the robot stands EXACTLY at the final pose of
+#                           station NAME (driven there by hand, arms in carry pose); records gap, heading and
+#                           lateral position relative to the face, and a staging pose BACK m (0.5) behind it
+#   run.sh undock [MIN]     reverse straight out along the last docking approach (>= MIN m, 0.30)    (MOVES)
 #   run.sh selfscan         measure arms/tray with the lidar and store them (no motion)
 #   run.sh check NAME       what docking at NAME would do from here (no motion)
 #   run.sh log              follow the job log
@@ -35,6 +39,9 @@ case "$1" in
             extra=$(python3 -c "import json,sys;s=json.load(open('stations.json')).get(sys.argv[1]);print('' if s is None else ('--here --closest' if s.get('untaught') else '--closest'))" "$2")
             [ -z "$extra" ] && { echo "unknown station $2"; exit 1; }
             start "$2" timeout 500 python3 dock.py dock "$2" $(num "$3" '') --leave $extra ;;
+  undock)   start undock timeout 90 python3 dock.py undock $(num "$2" '') ;;
+  teach-pose) [ -z "$2" ] && { echo "usage: teach-pose NAME [BACK] [left|right]"; exit 1; }
+            timeout 90 python3 dock.py teach-pose "$2" $(num "$3" 0.5) ${4:+"$4"} ;;
   demo-dry) timeout 120 python3 dock.py dock D $(num "$2" 0.25) --leave --here --closest --dry ;;
   stop)     if running; then pkill -TERM -s "$(ps -o sid= -p $(cat $PID) | tr -d ' ')" 2>/dev/null; fi
             rm -f "$PID"; printf '{"state": "failed", "job": "stopped", "error": "stopped by user", "t": %s}\n' "$(date +%s)" > "$JS"
@@ -59,5 +66,5 @@ P
   selfscan) timeout 60 python3 dock.py selfscan --save ;;
   check)    timeout 90 python3 dock.py check "${2:-D}" ;;
   log)      tail -n 30 -f "$LOG" ;;
-  *)        sed -n 2,17p "$0" ;;
+  *)        sed -n 2,21p "$0" ;;
 esac

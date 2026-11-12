@@ -153,6 +153,20 @@ class GentoNavigation:
         self.active = destination
         self._seen_active = False
 
+    def start_undock(self):
+        """Reverse straight out along the last docking approach (e.g. after placing, before the arms move).
+        Completion is polled like a destination: is_arrived_and_stopped() / raise_if_failed()."""
+        if self.transport == "ros":
+            ack = self._ros_command(cmd="undock")
+            if not ack.get("ok"):
+                raise NavigationError(f"底盘拒绝后退任务: {ack.get('out')}")
+        else:
+            out = self._ssh("undock")
+            if "started job" not in out:
+                raise NavigationError(f"底盘拒绝后退任务: {out.strip()}")
+        self.active = "undock"
+        self._seen_active = False
+
     def _current(self):
         """Status of the job we started.  Until the chassis has reported our job once, any other job's result
         (e.g. a stale "stopped" left by the previous run) is ignored and reads as still starting."""

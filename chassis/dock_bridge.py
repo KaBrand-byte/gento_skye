@@ -52,6 +52,8 @@ class Bridge(Node):
         cid = c.get('id', '')
         if c.get('cmd') == 'goto':
             args = ['goto', str(c['station'])] + ([('%.3f' % float(c['gap']))] if c.get('gap') is not None else [])
+        elif c.get('cmd') == 'undock':              # reverse straight out along the last docking approach
+            args = ['undock']
         elif c.get('cmd') == 'stop':
             args = ['stop']
         elif c.get('cmd') == 'tune':

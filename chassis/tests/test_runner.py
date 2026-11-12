@@ -38,6 +38,9 @@ class FakeNav:
         if self.active == self.fail_on and self.count > 1:
             raise NavigationError("ABORT: blocked")
 
+    def start_undock(self):
+        FakeNav.log.append(("start", "undock")); self.active, self.count = "undock", 0
+
     def job_status(self):
         return {"state": "done", "job": self.active, "final": "FINAL {}"}
 
@@ -79,10 +82,25 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(report["status"], "completed")
         self.assertEqual(report["navigation"], "arrived")
-        self.assertEqual([l["destination"] for l in report["metadata"]["navigation_legs"]], ["T", "D"])
-        self.assertEqual(FakeNav.log, [("init", {"D": 0.3}), ("selfscan",), ("start", "T"), ("start", "D")])
+        self.assertEqual([l["destination"] for l in report["metadata"]["navigation_legs"]], ["T", "D", "undock", "T"])
+        self.assertEqual(FakeNav.log, [("init", {"D": 0.3}), ("selfscan",), ("start", "T"), ("start", "D"),
+                                       ("start", "undock"), ("start", "T")])
         names = [s["name"] for s in report["steps"]]
         self.assertLess(names.index("receive_lift"), names.index("forward"))   # carry pose held while driving
+        back = [s["name"] for s in report["metadata"]["return_steps"]]
+        self.assertEqual(back[-2:], ["handover_and_close", "awaiting_task_start"])   # carry pose again before driving back
+
+    def test_no_return(self):
+        code, report = self.run_trial(extra=["--no-return"])
+        self.assertEqual(code, 0)
+        self.assertEqual([l["destination"] for l in report["metadata"]["navigation_legs"]], ["T", "D"])
+
+    def test_failure_on_the_way_back_keeps_the_placement_result(self):
+        code, report = self.run_trial(fail_on="undock")
+        self.assertEqual(code, 1)
+        self.assertEqual(report["status"], "completed")
+        self.assertEqual(report["metadata"]["return_status"], "failed")
+        self.assertIn(("stop", "undock"), FakeNav.log)
 
     def test_failure_at_the_place_station_stops_chassis_and_arms_without_placing(self):
         code, report = self.run_trial(fail_on="D")

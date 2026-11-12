@@ -72,6 +72,19 @@ class SshTransportTests(unittest.TestCase):
             with self.assertRaisesRegex(NavigationError, "stopped by user"):
                 nav.raise_if_failed()
 
+    def test_undock_is_a_job_polled_like_a_destination(self):
+        calls, patch = self.patch_run([
+            "started job undock (9)\n",
+            json.dumps({"state": "done", "job": "D"}),                 # the docking before it: ignored
+            json.dumps({"state": "done", "job": "undock", "final": "FINAL {}"}),
+        ])
+        with patch:
+            nav = GentoNavigation(transport="ssh")
+            nav.start_undock()
+            self.assertFalse(nav.is_arrived_and_stopped())
+            self.assertTrue(nav.is_arrived_and_stopped())
+        self.assertTrue(calls[0].endswith("run.sh undock"))
+
     def test_stop_and_tune_commands(self):
         calls, patch = self.patch_run(["stopped\n", "D {\"gap\": 0.3}\n"])
         with patch:

@@ -10,9 +10,14 @@
 #   goto NAME [GAP]       DRIVE: dock at station NAME (T, D, ...)                            (MOVES, asks y/n)
 #   tune NAME KEY VALUE   fine-tune: gap (m) | lat_offset (m, + = further left) | yaw_offset (deg, + = left)
 #   teach NAME            record the current lateral position as station NAME (turns a little, asks y/n)
+#   teach-pose NAME [BACK] [left|right]   NO MOTION: robot stands EXACTLY at the final pose of NAME (driven
+#                         there by hand, arms in carry pose): records gap + heading + lateral position to the
+#                         face, and a staging pose BACK m (default 0.5) straight behind it
+#   undock                DRIVE: reverse straight out along the last docking approach              (asks y/n)
 #   job        job status JSON (what the skye_task adapter reads)
 #   task [args]    START THE FULL TASK on the Orin (arms + navigation, in tmux)       (MOVES, asks y/n)
-#                  args e.g. --selfscan | --start '' | --place-gap 0.30
+#                  T -> Enter -> D -> place -> reverse out -> arms to carry pose -> back to T
+#                  args e.g. --selfscan | --no-return | --start '' | --place-gap 0.30
 #   task-attach    re-attach to the running task (after a Wi-Fi drop); Ctrl-b d detaches, task keeps running
 #   task-stop      Ctrl-C to the task (stops arms + chassis) and software-stop the chassis
 #   task-check     no motion: task config + SDK version on the Orin
@@ -43,9 +48,11 @@ switch ($Cmd) {
     'demo'     { Confirm-Motion "table -> D1 -> straight towards the conveyor, gap $(if ($Arg) {$Arg} else {'0.25'}) m (stops earlier if blocked)"; ssh chassis "$remote demo $Arg"; Write-Host "  follow with: .\gento.ps1 log    stop with: .\gento.ps1 stop" }
     'goto'     { Confirm-Motion "dock at station $Arg"; ssh chassis "$remote goto $Arg $($Rest -join ' ')" }
     'tune'     { ssh chassis "$remote tune $Arg $($Rest -join ' ')" }
+    'teach-pose' { ssh chassis "$remote teach-pose $Arg $($Rest -join ' ')" }
+    'undock'   { Confirm-Motion "reverse straight out of the last docking"; ssh chassis "$remote undock" }
     'teach'    { Confirm-Motion "teach station $Arg at the current lateral position (turns a little)"; ssh chassis "$remote teach $Arg" }
     'job'      { ssh chassis "$remote job-status" }
-    'task'        { Confirm-Motion "FULL TASK on the Orin: arms to carry pose, drive to T, Enter, drive to D, place";
+    'task'        { Confirm-Motion "FULL TASK on the Orin: arms to carry pose, drive to T, Enter, drive to D, place, back to T";
                     ssh -t orin "bash ~/gento_skye/chassis/client/orin_task.sh start $Arg $($Rest -join ' ')" }
     'task-attach' { ssh -t orin "bash ~/gento_skye/chassis/client/orin_task.sh attach" }
     'task-stop'   { ssh orin "bash ~/gento_skye/chassis/client/orin_task.sh stop" }
@@ -58,5 +65,5 @@ switch ($Cmd) {
         if (-not $ok) { Start-Process ssh -ArgumentList '-o ExitOnForwardFailure=yes -o ServerAliveInterval=10 chassis-web' -WindowStyle Minimized; Start-Sleep 4 }
         Start-Process 'chrome.exe' 'http://localhost:8080'
     }
-    default    { Get-Content $PSCommandPath -TotalCount 24 | Select-Object -Skip 1 }
+    default    { Get-Content $PSCommandPath -TotalCount 29 | Select-Object -Skip 1 }
 }

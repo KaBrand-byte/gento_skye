@@ -7,6 +7,9 @@ Order (run from the repository root on the machine that runs skye_task, ROS env 
   4. handover                          press Enter (grippers not integrated yet: unloaded run)
   5. navigate to the place station     (default D, the conveyor)                  <- chassis moves
   6. skye_task Sequence.start()        forward 100 mm, down 100 mm, hands out, back to ready
+  7. return (unless --no-return)       reverse straight out of the place station   <- chassis moves
+                                       a fresh Sequence.prepare(): arms back to the carry (receive) pose
+                                       navigate to the start station again, ready for the next tray
 
 While the chassis drives, the arm/lift/waist feedback is checked continuously through the sequence's own
 `checked_feedback()`; Ctrl-C / SIGTERM, an arm deviation, a chassis failure or a timeout stops BOTH the
@@ -43,14 +46,15 @@ class Trial:
         self.nav = None
         self.sequence = None
 
-    def navigate(self, destination):
-        """Drive to `destination`; keep checking the arms; return only after docked and standing still."""
+    def navigate(self, destination, undock=False):
+        """Drive to `destination` (or reverse out with undock=True); keep checking the arms; return only after
+        docked and standing still."""
         nav, seq, begin = self.nav, self.sequence, time.monotonic()
         leg = {"destination": destination, "status": "running"}
         self.legs.append(leg)
         logging.info("导航开始: %s", destination)
         self.navigating = True
-        nav.start(destination)
+        nav.start_undock() if undock else nav.start(destination)
         while True:
             seq.checked_feedback()                      # stop request + arm/lift/waist feedback unchanged
             if nav.is_arrived_and_stopped():
@@ -61,7 +65,7 @@ class Trial:
             time.sleep(self.args.poll)
         self.navigating = False
         feedback = seq.checked_feedback()
-        if any(not seq._near(actual, target) for actual, target in zip(feedback.joints, seq.config.receive)):
+        if not undock and any(not seq._near(actual, target) for actual, target in zip(feedback.joints, seq.config.receive)):
             raise MotionError(f"导航到 {destination} 后双臂已偏离运输（接盘）姿态")
         status = nav.job_status()
         leg.update(status="arrived", seconds=round(time.monotonic() - begin, 1), final=status.get("final"),
@@ -78,6 +82,30 @@ class Trial:
             finally:
                 self.navigating = False
         return ""
+
+    def return_to_start(self, config, sdk):
+        """After placing: reverse out along the approach (arms are in the ready pose), arms back to the carry
+        (receive) pose with a fresh SDK link + Sequence (a Sequence runs once), dock at the start station again."""
+        self.navigate("undock", undock=True)
+        try:
+            sdk.close()
+        except Exception as error:
+            logging.warning("SDK 资源释放失败: %s", error)
+        sdk = GentoSDK(config)
+        placed = self.sequence
+        self.sequence = Sequence(sdk, config, on_event=lambda name, detail: logging.info("return %s %s", name, detail))
+        try:
+            self.sequence.prepare()
+            self.navigate(self.args.start)
+        except (Exception, KeyboardInterrupt) as error:
+            self.sequence.fail(error)
+            placed.result.metadata["return_error"] = self.sequence.result.error
+            raise
+        finally:
+            placed.result.metadata["return_steps"] = self.sequence.result.steps
+            self.sequence = placed
+            self._sdk = sdk
+        return sdk
 
     def run(self):
         a = self.args
@@ -99,20 +127,26 @@ class Trial:
             wait_for_start(self.sequence)
             self.navigate(a.place)
             self.sequence.start()                           # forward, down, hands out, back to ready
+            if a.start and not a.no_return:
+                sdk = self.return_to_start(config, sdk)
             exit_code = 0
         except (Exception, KeyboardInterrupt) as error:
             logging.error("流程停止: %s", error)
             chassis_error = self.stop_chassis()
-            self.sequence.fail(error)
+            if result.status == "completed":                # placed; the failure was on the way back
+                result.metadata["return_status"] = "stopped" if isinstance(error, KeyboardInterrupt) else "failed"
+                result.metadata.setdefault("return_error", str(error))
+            else:
+                self.sequence.fail(error)
             if chassis_error:
                 result.stop_error = "; ".join(x for x in (result.stop_error, chassis_error) if x)
             for leg in self.legs:
                 if leg["status"] == "running":
                     leg["status"] = "stopped" if isinstance(error, KeyboardInterrupt) or "停止" in str(error) else "failed"
-            exit_code = 130 if result.status == "stopped" else 1
+            exit_code = 130 if result.status == "stopped" or isinstance(error, KeyboardInterrupt) else 1
         finally:
             try:
-                sdk.close()
+                getattr(self, "_sdk", sdk).close()
             except Exception as error:
                 logging.error("SDK 资源释放失败: %s", error)
             try:
@@ -143,6 +177,7 @@ def main(argv=None):
     p.add_argument("--place-gap", type=float, help="放置站点间隙 m（默认用站点配置）")
     p.add_argument("--transport", choices=("ros", "ssh"), default="ros")
     p.add_argument("--ssh-target", default="chassis")
+    p.add_argument("--no-return", action="store_true", help="放置后不返回起始点")
     p.add_argument("--selfscan", action="store_true", help="准备完成后先测手臂／托盘占位（车前约 1 m 需无物体）")
     p.add_argument("--nav-timeout", type=float, default=600.0)
     p.add_argument("--poll", type=float, default=0.5)
