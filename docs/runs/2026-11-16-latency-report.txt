@@ -1,0 +1,35 @@
+===== 19:30:35 timeout 650 python3 dock.py dock T --leave --closest
+  #   command                            scan start   input ready  plan start   plan done     in>plan   in>cmd  in>move
+  1*  move x 0.000 y 0.000 yaw 150.9     19:30:44.098 19:30:44.843 -            19:30:44.919       75       96      288
+  2   move x 0.000 y 0.000 yaw 137.4     19:31:11.186 19:31:11.943 -            19:31:12.011       68       81      513
+  3   move x 0.000 y -0.048 yaw 0.0      19:31:20.484 19:31:21.236 -            19:31:21.360      124      128      303
+  4   move x 0.000 y 0.022 yaw 0.0       19:31:30.263 19:31:31.037 19:31:31.253 19:31:31.402      365      368      611
+  START-UP (* first command): input (lidar snapshot 240000 points, 6 frames) -> plan done 75 ms [OK]; -> motion started 288 ms [OK]
+  all 4 commands: input -> plan max 365 ms (move x 0.000 y 0.022 yaw 0.0) [OK]; end: FINAL {"name": "T", "mode": "map+ref", "err_x": 0.0062, "err_y": 0.017, "err_yaw_deg": 0.2
+===== 19:32:20 timeout 650 python3 dock.py dock D --leave --closest
+  #   command                            scan start   input ready  plan start   plan done     in>plan   in>cmd  in>move
+  1*  move x 0.000 y 0.025 yaw 0.0       19:32:27.044 19:32:27.725 -            19:32:27.872      147      164      394
+  2   move x 0.000 y 0.000 yaw 41.7      19:32:39.109 19:32:39.834 -            19:32:39.900       66       81      209
+  3   move x 0.000 y 0.000 yaw -131.2    19:33:16.758 19:33:17.538 -            19:33:17.602       63       67      490
+  4   move x 0.000 y 0.000 yaw -1.4      19:33:25.213 19:33:25.926 19:33:26.268 19:33:26.330      404      407      802
+  5   move x 0.000 y -0.041 yaw 0.0      19:33:27.320 19:33:28.040 19:33:28.760 19:33:29.168     1128     1130     1282
+  6   move x 0.000 y 0.262 yaw 0.0       19:33:39.277 19:33:40.040 19:33:40.395 19:33:40.511      470      476      682
+  7   move x 0.305 y 0.000 yaw 0.0       19:33:45.253 19:33:45.934 -            19:33:46.062      128      136      302
+  START-UP (* first command): input (lidar snapshot 240000 points, 6 frames) -> plan done 147 ms [OK]; -> motion started 394 ms [OK]
+  all 7 commands: input -> plan max 1128 ms (move x 0.000 y -0.041 yaw 0.0) [OK]; end: FINAL {"name": "D", "gap_target": 0.1805, "gap": 0.1937, "ang_deg": 0.89, "fwd": 0.3002, "
+===== 19:34:22 timeout 90 python3 dock.py undock
+  #   command                            scan start   input ready  plan start   plan done     in>plan   in>cmd  in>move
+  1*  move x -0.505 y 0.000 yaw 0.0      19:34:25.059 19:34:25.843 -            19:34:25.868       25       63      479
+  START-UP (* first command): input (lidar snapshot 240000 points, 6 frames) -> plan done 25 ms [OK]; -> motion started 479 ms [OK]
+  all 1 commands: input -> plan max 25 ms (move x -0.505 y 0.000 yaw 0.0) [OK]; end: FINAL {"name": "undock", "back": 0.5054}
+===== 19:34:39 timeout 650 python3 dock.py dock T --leave --closest
+  #   command                            scan start   input ready  plan start   plan done     in>plan   in>cmd  in>move
+  1*  move x 0.000 y -0.219 yaw 0.0      19:34:48.266 19:34:49.036 -            19:34:49.188      152      176      392
+  2   move x 0.000 y 0.000 yaw -47.6     19:34:58.211 19:34:58.930 -            19:34:59.000       70       85      225
+  3   move x 0.000 y 0.000 yaw 138.9     19:35:42.584 19:35:43.336 -            19:35:43.394       58       60      503
+  4   move x 0.000 y 0.017 yaw 0.0       19:35:52.241 19:35:52.946 -            19:35:53.092      147      155      387
+  5   move x 0.000 y 0.026 yaw 0.0       19:36:01.520 19:36:02.237 19:36:02.475 19:36:02.594      358      361      483
+  6   move x 0.000 y 0.020 yaw 0.0       19:36:06.490 19:36:07.227 19:36:07.721 19:36:07.865      637      640      803
+  7   move x 0.000 y 0.018 yaw 0.0       19:36:10.314 19:36:11.036 19:36:11.474 19:36:11.584      548      550      884
+  START-UP (* first command): input (lidar snapshot 240000 points, 6 frames) -> plan done 152 ms [OK]; -> motion started 392 ms [OK]
+  all 7 commands: input -> plan max 637 ms (move x 0.000 y 0.020 yaw 0.0) [OK]; end: FINAL {"name": "T", "mode": "map+ref", "err_x": 0.0073, "err_y": 0.003, "err_yaw_deg": 0.2

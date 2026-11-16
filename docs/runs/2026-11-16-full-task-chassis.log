@@ -1,0 +1,238 @@
+===== 19:30:35 timeout 650 python3 dock.py dock T --leave --closest
+[19:30:37.605    1.5s] fine-tune: lat_offset 0.000 m, yaw_offset 13.07 deg
+[19:30:39.222    3.2s] localisation: pose [1.564, 1.481, -18.3], scan-to-map match 0.78
+[19:30:40.031    4.0s] chassis ready to move (soft manual, parking released): 809 ms, before capturing input
+[19:30:40.852    4.8s] INPUT ready: pose settled (1.564, 1.481, -18.3 deg)
+[19:30:40.852    4.8s] PLAN start: leave the station (back to its safe point)
+[19:30:41.659    5.6s] INPUT ready: pose settled (1.564, 1.481, -18.3 deg)
+[19:30:42.463    6.4s] INPUT ready: pose settled (1.564, 1.481, -18.3 deg)
+[19:30:42.463    6.4s] LIDAR scan start
+[19:30:43.232    7.2s] INPUT ready: lidar snapshot 240000 points, 6 frames
+[19:30:43.293    7.2s] PLAN start: turn towards the destination
+[19:30:44.098    8.0s] INPUT ready: pose settled (1.564, 1.481, -18.3 deg)
+[19:30:44.098    8.0s] LIDAR scan start
+[19:30:44.843    8.8s] INPUT ready: lidar snapshot 240000 points, 6 frames
+[19:30:44.918    8.9s] pre-turn 150.9 deg towards the destination
+[19:30:44.919    8.9s] PLAN done: move x 0.000 y 0.000 yaw 150.9 | input -> plan 75 ms
+[19:30:44.939    8.9s] COMMAND accepted: move x 0.000 y 0.000 yaw 150.9 | input -> command 96 ms
+[19:30:45.131    9.1s] MOTION started: move x 0.000 y 0.000 yaw 150.9 | input -> motion 288 ms
+[19:30:53.661   17.6s]   rel move x=0.000 y=0.000 yaw=150.90deg -> (0, '完成相对移动')
+[19:30:53.701   17.6s] task 10118 0 Succ (speed 0.35 m/s)
+[19:31:10.063   34.0s] arrived 0.082 m from staging but the server keeps the task open: cancelling it
+[19:31:10.375   34.3s] turn to -94.8 deg: at (1.274, 1.890) yaw 128.6, delta 136.6
+[19:31:11.186   35.1s] chassis ready to move (soft manual, parking released): 811 ms, before capturing input
+[19:31:11.186   35.1s] LIDAR scan start
+[19:31:11.943   35.9s] INPUT ready: lidar snapshot 240000 points, 6 frames
+[19:31:12.011   35.9s] PLAN done: move x 0.000 y 0.000 yaw 137.4 | input -> plan 68 ms
+[19:31:12.024   36.0s] COMMAND accepted: move x 0.000 y 0.000 yaw 137.4 | input -> command 81 ms
+[19:31:12.456   36.4s] MOTION started: move x 0.000 y 0.000 yaw 137.4 | input -> motion 513 ms
+[19:31:19.679   43.6s]   rel move x=0.000 y=0.000 yaw=137.40deg -> (0, '完成相对移动')
+[19:31:19.679   43.6s] turn to -94.8 deg: at (1.314, 1.956) yaw -95.4, delta 0.6
+[19:31:20.484   44.4s] INPUT ready: pose settled (1.314, 1.956, -95.4 deg)
+[19:31:20.484   44.4s] map approach 0: to go x -0.431 y -0.048 m, yaw 0.68 deg
+[19:31:20.484   44.4s] PLAN start: straight path
+[19:31:20.484   44.4s] LIDAR scan start
+[19:31:21.236   45.2s] INPUT ready: lidar snapshot 240000 points, 6 frames
+[19:31:21.360   45.3s] PLAN done: move x 0.000 y -0.048 yaw 0.0 | input -> plan 124 ms
+[19:31:21.364   45.3s] COMMAND accepted: move x 0.000 y -0.048 yaw 0.0 | input -> command 128 ms
+[19:31:21.539   45.5s] MOTION started: move x 0.000 y -0.048 yaw 0.0 | input -> motion 303 ms
+[19:31:23.991   47.9s]   rel move x=0.000 y=-0.048 yaw=0.00deg -> (0, '完成相对移动')
+[19:31:30.262   54.2s]   rel move x=-0.442 y=0.000 yaw=0.00deg -> (0, '完成相对移动')
+[19:31:30.263   54.2s] LIDAR scan start
+[19:31:31.037   55.0s] INPUT ready: lidar snapshot 240000 points, 6 frames
+[19:31:31.253   55.2s]   scan match: rms 0.011 m, 69% matched, to go x 0.001 y 0.022 yaw 0.16 deg
+[19:31:31.253   55.2s] PLAN start: straight path
+[19:31:31.402   55.3s] PLAN done: move x 0.000 y 0.022 yaw 0.0 | input -> plan 365 ms
+[19:31:31.405   55.3s] COMMAND accepted: move x 0.000 y 0.022 yaw 0.0 | input -> command 368 ms
+[19:31:31.648   55.6s] MOTION started: move x 0.000 y 0.022 yaw 0.0 | input -> motion 611 ms
+[19:31:33.853   57.8s]   rel move x=0.000 y=0.022 yaw=0.00deg -> (0, '完成相对移动')
+[19:31:33.853   57.8s] LIDAR scan start
+[19:31:34.640   58.6s] INPUT ready: lidar snapshot 240000 points, 6 frames
+[19:31:35.203   59.1s]   scan match: rms 0.010 m, 63% matched, to go x 0.006 y 0.017 yaw 0.23 deg
+[19:31:35.203   59.1s] PLAN start: reference scan match
+[19:31:35.204   59.1s] LIDAR scan start
+[19:31:35.930   59.9s] INPUT ready: lidar snapshot 239904 points, 6 frames
+[19:31:36.402   60.3s]   scan match: rms 0.010 m, 64% matched, to go x 0.006 y 0.017 yaw 0.25 deg
+[19:31:36.403   60.3s] FINAL {"name": "T", "mode": "map+ref", "err_x": 0.0062, "err_y": 0.017, "err_yaw_deg": 0.25}
+===== 19:32:20 timeout 650 python3 dock.py dock D --leave --closest
+[19:32:22.534    1.5s] fine-tune: lat_offset 0.000 m, yaw_offset -1.35 deg
+[19:32:24.146    3.1s] localisation: pose [1.309, 2.408, -94.8], scan-to-map match 0.96
+[19:32:25.423    4.4s] chassis ready to move (soft manual, parking released): 1276 ms, before capturing input
+[19:32:26.238    5.2s] INPUT ready: pose settled (1.287, 2.381, -95.0 deg)
+[19:32:27.044    6.0s] INPUT ready: pose settled (1.287, 2.381, -95.0 deg)
+[19:32:27.044    6.0s] at map station T: back to its safe point first (x 0.57, y 0.03)
+[19:32:27.044    6.0s] PLAN start: straight path
+[19:32:27.044    6.0s] LIDAR scan start
+[19:32:27.725    6.7s] INPUT ready: lidar snapshot 240000 points, 6 frames
+[19:32:27.872    6.8s] PLAN done: move x 0.000 y 0.025 yaw 0.0 | input -> plan 147 ms
+[19:32:27.889    6.8s] COMMAND accepted: move x 0.000 y 0.025 yaw 0.0 | input -> command 164 ms
+[19:32:28.120    7.1s] MOTION started: move x 0.000 y 0.025 yaw 0.0 | input -> motion 394 ms
+[19:32:30.422    9.4s]   rel move x=0.000 y=0.025 yaw=0.00deg -> (0, '完成相对移动')
+[19:32:37.463   16.4s]   rel move x=0.584 y=0.000 yaw=0.00deg -> (0, '完成相对移动')
+[19:32:37.463   16.4s] LIDAR scan start
+[19:32:38.237   17.2s] INPUT ready: lidar snapshot 240000 points, 6 frames
+[19:32:38.300   17.2s] PLAN start: turn towards the destination
+[19:32:39.109   18.0s] INPUT ready: pose settled (1.286, 1.838, -95.1 deg)
+[19:32:39.109   18.0s] LIDAR scan start
+[19:32:39.834   18.8s] INPUT ready: lidar snapshot 240000 points, 6 frames
+[19:32:39.900   18.8s] pre-turn 41.7 deg towards the destination
+[19:32:39.900   18.8s] PLAN done: move x 0.000 y 0.000 yaw 41.7 | input -> plan 66 ms
+[19:32:39.915   18.8s] COMMAND accepted: move x 0.000 y 0.000 yaw 41.7 | input -> command 81 ms
+[19:32:40.043   19.0s] MOTION started: move x 0.000 y 0.000 yaw 41.7 | input -> motion 209 ms
+[19:32:44.883   23.8s]   rel move x=0.000 y=0.000 yaw=41.69deg -> (0, '完成相对移动')
+[19:32:44.926   23.9s] task 10119 0 Succ (speed 0.35 m/s)
+[19:33:15.949   54.9s] turn to 173.9 deg: at (3.134, -0.647) yaw -55.7, delta -130.4
+[19:33:16.758   55.7s] chassis ready to move (soft manual, parking released): 809 ms, before capturing input
+[19:33:16.758   55.7s] LIDAR scan start
+[19:33:17.538   56.5s] INPUT ready: lidar snapshot 240000 points, 6 frames
+[19:33:17.602   56.5s] PLAN done: move x 0.000 y 0.000 yaw -131.2 | input -> plan 63 ms
+[19:33:17.605   56.5s] COMMAND accepted: move x 0.000 y 0.000 yaw -131.2 | input -> command 67 ms
+[19:33:18.028   57.0s] MOTION started: move x 0.000 y 0.000 yaw -131.2 | input -> motion 490 ms
+[19:33:25.211   64.1s]   rel move x=0.000 y=0.000 yaw=-131.19deg -> (0, '完成相对移动')
+[19:33:25.213   64.1s] turn to 173.9 deg: at (3.108, -0.596) yaw 175.7, delta -1.8
+[19:33:25.213   64.1s] LIDAR scan start
+[19:33:25.926   64.9s] INPUT ready: lidar snapshot 240000 points, 6 frames
+[19:33:26.268   65.2s] staging measure {"dist": 1.0079, "gap": 0.6699, "ang_deg": -0.07, "n": 5300, "rms": 0.0047, "span": 2.47, "ends": [[1.008, -0.222], [1.008, -0.042]]}
+[19:33:26.268   65.2s] PLAN start: heading correction
+[19:33:26.268   65.2s] rotate -1.42 deg
+[19:33:26.268   65.2s] PLAN start: turn in place
+[19:33:26.330   65.3s] PLAN done: move x 0.000 y 0.000 yaw -1.4 | input -> plan 404 ms
+[19:33:26.333   65.3s] COMMAND accepted: move x 0.000 y 0.000 yaw -1.4 | input -> command 407 ms
+[19:33:26.728   65.7s] MOTION started: move x 0.000 y 0.000 yaw -1.4 | input -> motion 802 ms
+[19:33:27.320   66.3s]   rel move x=0.000 y=0.000 yaw=-1.42deg -> (0, '完成相对移动')
+[19:33:27.320   66.3s] LIDAR scan start
+[19:33:28.040   67.0s] INPUT ready: lidar snapshot 240000 points, 6 frames
+[19:33:28.529   67.5s]   re-measure {"dist": 1.0077, "gap": 0.6697, "ang_deg": 0.63, "n": 5194, "rms": 0.0047, "span": 2.48, "ends": [[1.008, -0.03], [1.01, -0.213]]}
+[19:33:28.760   67.7s] PLAN start: approach plan
+[19:33:28.818   67.8s] plan: sideways -0.041 m, forward 0.489 m, surface top 0.82 m
+[19:33:29.168   68.1s] approach: sideways -0.041 m, then forward 0.189 m
+[19:33:29.168   68.1s] PLAN done: move x 0.000 y -0.041 yaw 0.0 | input -> plan 1128 ms
+[19:33:29.170   68.1s] COMMAND accepted: move x 0.000 y -0.041 yaw 0.0 | input -> command 1130 ms
+[19:33:29.322   68.3s] MOTION started: move x 0.000 y -0.041 yaw 0.0 | input -> motion 1282 ms
+[19:33:31.869   70.8s]   rel move x=0.000 y=-0.041 yaw=0.00deg -> (0, '完成相对移动')
+[19:33:36.415   75.3s]   rel move x=0.200 y=0.000 yaw=0.00deg -> (0, '完成相对移动')
+[19:33:36.416   75.4s] LIDAR scan start
+[19:33:37.139   76.1s] INPUT ready: lidar snapshot 240000 points, 6 frames
+[19:33:37.659   76.6s] LIDAR scan start
+[19:33:38.449   77.4s] INPUT ready: lidar snapshot 240000 points, 6 frames
+[19:33:38.908   77.8s]   stage 2 measure {"dist": 0.8187, "gap": 0.4807, "ang_deg": 0.6, "n": 5352, "rms": 0.005, "span": 2.48, "ends": [[0.821, -0.199], [0.819, -0.01]]}
+[19:33:38.908   77.8s] PLAN start: approach plan
+[19:33:39.040   78.0s] plan: sideways -0.022 m, forward 0.300 m, surface top 0.82 m
+[19:33:39.277   78.2s] PLAN start: reference scan match
+[19:33:39.277   78.2s] LIDAR scan start
+[19:33:40.040   79.0s] INPUT ready: lidar snapshot 240000 points, 6 frames
+[19:33:40.395   79.3s]   scan match: rms 0.013 m, 64% matched, to go x 0.296 y 0.262 yaw -0.52 deg
+[19:33:40.395   79.3s] PLAN start: small sideways correction
+[19:33:40.511   79.4s] sideways correction 0.262 m (0.262)
+[19:33:40.511   79.4s] PLAN done: move x 0.000 y 0.262 yaw 0.0 | input -> plan 470 ms
+[19:33:40.517   79.5s] COMMAND accepted: move x 0.000 y 0.262 yaw 0.0 | input -> command 476 ms
+[19:33:40.722   79.7s] MOTION started: move x 0.000 y 0.262 yaw 0.0 | input -> motion 682 ms
+[19:33:45.253   84.2s]   rel move x=0.000 y=0.262 yaw=0.00deg -> (0, '完成相对移动')
+[19:33:45.253   84.2s] LIDAR scan start
+[19:33:45.934   84.9s] INPUT ready: lidar snapshot 240000 points, 6 frames
+[19:33:46.062   85.0s] last stage: forward 0.300 m
+[19:33:46.062   85.0s] PLAN done: move x 0.305 y 0.000 yaw 0.0 | input -> plan 128 ms
+[19:33:46.070   85.0s] COMMAND accepted: move x 0.305 y 0.000 yaw 0.0 | input -> command 136 ms
+[19:33:46.236   85.2s] MOTION started: move x 0.305 y 0.000 yaw 0.0 | input -> motion 302 ms
+[19:33:51.180   90.1s]   rel move x=0.305 y=0.000 yaw=0.00deg -> (0, '完成相对移动')
+[19:33:51.180   90.1s] LIDAR scan start
+[19:33:51.939   90.9s] INPUT ready: lidar snapshot 240000 points, 6 frames
+[19:33:52.442   91.4s] PLAN start: reference scan match
+[19:33:52.445   91.4s] LIDAR scan start
+[19:33:53.142   92.1s] INPUT ready: lidar snapshot 240000 points, 6 frames
+[19:33:53.385   92.3s]   scan match: rms 0.012 m, 73% matched, to go x 0.010 y 0.002 yaw -0.66 deg
+[19:33:53.385   92.3s] FINAL {"name": "D", "gap_target": 0.1805, "gap": 0.1937, "ang_deg": 0.89, "fwd": 0.3002, "ref_err_x": 0.0097, "ref_err_y": 0.0023, "ref_err_yaw_deg": -0.66}
+===== 19:34:22 timeout 90 python3 dock.py undock
+[19:34:25.059    1.8s] chassis ready to move (soft manual, parking released): 809 ms, before capturing input
+[19:34:25.059    1.8s] LIDAR scan start
+[19:34:25.843    2.6s] INPUT ready: lidar snapshot 240000 points, 6 frames
+[19:34:25.868    2.6s] PLAN done: move x -0.505 y 0.000 yaw 0.0 | input -> plan 25 ms
+[19:34:25.906    2.7s] COMMAND accepted: move x -0.505 y 0.000 yaw 0.0 | input -> command 63 ms
+[19:34:26.322    3.1s] MOTION started: move x -0.505 y 0.000 yaw 0.0 | input -> motion 479 ms
+[19:34:31.712    8.5s]   rel move x=-0.505 y=0.000 yaw=0.00deg -> (0, '完成相对移动')
+[19:34:31.727    8.5s] FINAL {"name": "undock", "back": 0.5054}
+===== 19:34:39 timeout 650 python3 dock.py dock T --leave --closest
+[19:34:42.184    1.6s] fine-tune: lat_offset 0.000 m, yaw_offset 13.07 deg
+[19:34:43.745    3.1s] localisation: pose [3.088, -0.846, 175.2], scan-to-map match 0.96
+[19:34:45.023    4.4s] chassis ready to move (soft manual, parking released): 1278 ms, before capturing input
+[19:34:45.849    5.2s] INPUT ready: pose settled (3.118, -0.843, 175.1 deg)
+[19:34:45.849    5.2s] PLAN start: leave the station (back to its safe point)
+[19:34:46.654    6.0s] INPUT ready: pose settled (3.118, -0.843, 175.1 deg)
+[19:34:47.459    6.8s] INPUT ready: pose settled (3.118, -0.843, 175.1 deg)
+[19:34:48.266    7.6s] INPUT ready: pose settled (3.118, -0.843, 175.1 deg)
+[19:34:48.266    7.6s] in front of D: to its safe point first (x 0.03, y -0.22)
+[19:34:48.266    7.6s] PLAN start: straight path
+[19:34:48.266    7.6s] LIDAR scan start
+[19:34:49.036    8.4s] INPUT ready: lidar snapshot 240000 points, 6 frames
+[19:34:49.188    8.6s] PLAN done: move x 0.000 y -0.219 yaw 0.0 | input -> plan 152 ms
+[19:34:49.212    8.6s] COMMAND accepted: move x 0.000 y -0.219 yaw 0.0 | input -> command 176 ms
+[19:34:49.428    8.8s] MOTION started: move x 0.000 y -0.219 yaw 0.0 | input -> motion 392 ms
+[19:34:53.973   13.3s]   rel move x=0.000 y=-0.219 yaw=0.00deg -> (0, '完成相对移动')
+[19:34:56.580   15.9s]   rel move x=0.028 y=0.000 yaw=0.00deg -> (0, '完成相对移动')
+[19:34:56.580   15.9s] LIDAR scan start
+[19:34:57.353   16.7s] INPUT ready: lidar snapshot 240000 points, 6 frames
+[19:34:57.402   16.8s] PLAN start: turn towards the destination
+[19:34:58.210   17.6s] INPUT ready: pose settled (3.105, -0.640, 174.6 deg)
+[19:34:58.211   17.6s] LIDAR scan start
+[19:34:58.930   18.3s] INPUT ready: lidar snapshot 240000 points, 6 frames
+[19:34:59.000   18.4s] pre-turn -47.6 deg towards the destination
+[19:34:59.000   18.4s] PLAN done: move x 0.000 y 0.000 yaw -47.6 | input -> plan 70 ms
+[19:34:59.015   18.4s] COMMAND accepted: move x 0.000 y 0.000 yaw -47.6 | input -> command 85 ms
+[19:34:59.155   18.5s] MOTION started: move x 0.000 y 0.000 yaw -47.6 | input -> motion 225 ms
+[19:35:04.260   23.6s]   rel move x=0.000 y=0.000 yaw=-47.65deg -> (0, '完成相对移动')
+[19:35:04.289   23.7s] task 10120 0 Succ (speed 0.35 m/s)
+[19:35:41.463   60.8s] arrived 0.074 m from staging but the server keeps the task open: cancelling it
+[19:35:41.775   61.1s] turn to -94.8 deg: at (1.220, 1.868) yaw 127.1, delta 138.2
+[19:35:42.584   62.0s] chassis ready to move (soft manual, parking released): 809 ms, before capturing input
+[19:35:42.584   62.0s] LIDAR scan start
+[19:35:43.336   62.7s] INPUT ready: lidar snapshot 240000 points, 6 frames
+[19:35:43.394   62.8s] PLAN done: move x 0.000 y 0.000 yaw 138.9 | input -> plan 58 ms
+[19:35:43.396   62.8s] COMMAND accepted: move x 0.000 y 0.000 yaw 138.9 | input -> command 60 ms
+[19:35:43.839   63.2s] MOTION started: move x 0.000 y 0.000 yaw 138.9 | input -> motion 503 ms
+[19:35:51.430   70.8s]   rel move x=0.000 y=0.000 yaw=138.95deg -> (0, '完成相对移动')
+[19:35:51.431   70.8s] turn to -94.8 deg: at (1.245, 1.887) yaw -95.2, delta 0.4
+[19:35:52.240   71.6s] INPUT ready: pose settled (1.245, 1.887, -95.1 deg)
+[19:35:52.241   71.6s] map approach 0: to go x -0.506 y 0.017 m, yaw 0.35 deg
+[19:35:52.241   71.6s] PLAN start: straight path
+[19:35:52.241   71.6s] LIDAR scan start
+[19:35:52.946   72.3s] INPUT ready: lidar snapshot 240000 points, 6 frames
+[19:35:53.092   72.5s] PLAN done: move x 0.000 y 0.017 yaw 0.0 | input -> plan 147 ms
+[19:35:53.101   72.5s] COMMAND accepted: move x 0.000 y 0.017 yaw 0.0 | input -> command 155 ms
+[19:35:53.332   72.7s] MOTION started: move x 0.000 y 0.017 yaw 0.0 | input -> motion 387 ms
+[19:35:54.812   74.2s]   rel move x=0.000 y=0.017 yaw=0.00deg -> (0, '完成相对移动')
+[19:36:01.519   80.9s]   rel move x=-0.517 y=0.000 yaw=0.00deg -> (0, '完成相对移动')
+[19:36:01.520   80.9s] LIDAR scan start
+[19:36:02.237   81.6s] INPUT ready: lidar snapshot 240000 points, 6 frames
+[19:36:02.474   81.8s]   scan match: rms 0.011 m, 63% matched, to go x 0.015 y 0.026 yaw 0.27 deg
+[19:36:02.475   81.8s] PLAN start: straight path
+[19:36:02.594   82.0s] PLAN done: move x 0.000 y 0.026 yaw 0.0 | input -> plan 358 ms
+[19:36:02.597   82.0s] COMMAND accepted: move x 0.000 y 0.026 yaw 0.0 | input -> command 361 ms
+[19:36:02.719   82.1s] MOTION started: move x 0.000 y 0.026 yaw 0.0 | input -> motion 483 ms
+[19:36:04.374   83.7s]   rel move x=0.000 y=0.026 yaw=0.00deg -> (0, '完成相对移动')
+[19:36:06.489   85.9s]   rel move x=0.015 y=0.000 yaw=0.00deg -> (0, '完成相对移动')
+[19:36:06.490   85.9s] LIDAR scan start
+[19:36:07.227   86.6s] INPUT ready: lidar snapshot 240000 points, 6 frames
+[19:36:07.721   87.1s]   scan match: rms 0.011 m, 65% matched, to go x 0.006 y 0.020 yaw 0.19 deg
+[19:36:07.721   87.1s] PLAN start: straight path
+[19:36:07.865   87.2s] PLAN done: move x 0.000 y 0.020 yaw 0.0 | input -> plan 637 ms
+[19:36:07.867   87.2s] COMMAND accepted: move x 0.000 y 0.020 yaw 0.0 | input -> command 640 ms
+[19:36:08.030   87.4s] MOTION started: move x 0.000 y 0.020 yaw 0.0 | input -> motion 803 ms
+[19:36:09.900   89.3s]   rel move x=0.000 y=0.020 yaw=0.00deg -> (0, '完成相对移动')
+[19:36:10.312   89.7s]   rel move x=0.006 y=0.000 yaw=0.00deg -> (0, '不需要运动 (within tolerance).')
+[19:36:10.314   89.7s] LIDAR scan start
+[19:36:11.036   90.4s] INPUT ready: lidar snapshot 240000 points, 6 frames
+[19:36:11.474   90.8s]   scan match: rms 0.011 m, 64% matched, to go x 0.009 y 0.018 yaw 0.13 deg
+[19:36:11.474   90.8s] PLAN start: straight path
+[19:36:11.584   91.0s] PLAN done: move x 0.000 y 0.018 yaw 0.0 | input -> plan 548 ms
+[19:36:11.587   91.0s] COMMAND accepted: move x 0.000 y 0.018 yaw 0.0 | input -> command 550 ms
+[19:36:11.920   91.3s] MOTION started: move x 0.000 y 0.018 yaw 0.0 | input -> motion 884 ms
+[19:36:12.931   92.3s]   rel move x=0.000 y=0.018 yaw=0.00deg -> (0, '完成相对移动')
+[19:36:13.344   92.7s]   rel move x=0.009 y=0.000 yaw=0.00deg -> (0, '不需要运动 (within tolerance).')
+[19:36:13.344   92.7s] LIDAR scan start
+[19:36:14.042   93.4s] INPUT ready: lidar snapshot 240000 points, 6 frames
+[19:36:14.334   93.7s]   scan match: rms 0.010 m, 68% matched, to go x 0.007 y 0.003 yaw 0.23 deg
+[19:36:14.334   93.7s] PLAN start: reference scan match
+[19:36:14.335   93.7s] LIDAR scan start
+[19:36:15.030   94.4s] INPUT ready: lidar snapshot 240000 points, 6 frames
+[19:36:15.297   94.7s]   scan match: rms 0.010 m, 67% matched, to go x 0.007 y 0.003 yaw 0.24 deg
+[19:36:15.297   94.7s] FINAL {"name": "T", "mode": "map+ref", "err_x": 0.0073, "err_y": 0.003, "err_yaw_deg": 0.24}
