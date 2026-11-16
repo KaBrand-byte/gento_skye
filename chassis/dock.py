@@ -72,6 +72,7 @@ PLAN_LIMIT_MS = 1200           # requirement: data input -> planning done (comma
 INPUT_T = [None]               # when the newest sensor input used for planning became available
 CMD_INPUT_T = [None]           # input time of the command being executed (for the motion-start time)
 _FROZEN = [None]               # bench: plan on one fixed snapshot
+MOTION_JOB = [False]           # dock / undock (not dry): switch mode + release parking BEFORE capturing input
 LAT_FILE = os.path.join(HERE, 'latency_log.csv')
 # Timing events in the log (parsed by latency_report.py; every line carries the wall-clock time to the ms):
 #   LIDAR scan start | INPUT ready: ... | PLAN start: ... | PLAN done: ... | input -> plan N ms
@@ -150,6 +151,7 @@ def cloud(fresh=False):
         return _FROZEN[0]
     if not fresh and _CACHE['moves'] == MOVES[0] and time.time() - _CACHE['t'] < 2.0:
         return _CACHE['a']
+    ready_to_move()
     log('LIDAR scan start'); C.clear(); spin(0.15); C.clear(); t = time.time()
     while len(C) < FRAMES and time.time() - t < 4:
         rclpy.spin_once(n, timeout_sec=0.05)
@@ -647,9 +649,23 @@ MAP_CORRECTIONS = 1             # after the main translation
 MAP_MAX_MOVE = 2.5              # m: longest straight translation from the safe point to the station
 
 
+def ready_to_move():
+    """Motion jobs: soft manual mode + parking released (~1-1.5 s, wheels to zero) BEFORE the input of the next
+    plan is captured, so 'input -> command / motion' only contains planning.  No-op when already ready."""
+    if not MOTION_JOB[0] or S[0] is None:
+        return
+    if S[0].is_soft_auto or S[0].is_parking_mode or not _PARK_OK[0]:
+        t = time.time()
+        if S[0].is_soft_auto:
+            setmode(1)
+        unpark()
+        log('chassis ready to move (soft manual, parking released): %.0f ms, before capturing input' % (1000 * (time.time() - t)))
+
+
 def settled_pose(timeout=4.0):
     """Map pose once the localisation has caught up after a move (measured: it keeps correcting for ~1 s after
     the robot stops; with a fixed short wait the corrections chased stale poses by up to 10 cm)."""
+    ready_to_move()
     spin(0.4); last = map_pose(); t0 = time.time()
     while time.time() - t0 < timeout:
         spin(0.4); cur = map_pose()
@@ -1261,6 +1277,7 @@ elif cmd in ('dock', 'redock'):
             '| move needed before turning (x, y):', RM.leave_move(p0, CFG, 0.6),
             '| would navigate to', st.get('staging_pose') or st.get('staging'), '- skipped; checking from the current pose')
     elif cmd == 'dock':
+        MOTION_JOB[0] = True
         # the vendor navigation turns in place at the start and only sees obstacles below 0.8 m: first make
         # sure the robot + arms + tray can turn here.  With --leave (e.g. starting at the table edge with the
         # tray over the table) reverse straight out until turning is clear; otherwise stop.
@@ -1563,6 +1580,7 @@ elif cmd == 'undock':
     # undock [MIN] : reverse straight out along the last docking approach (at least MIN m, default 0.30)
     d = json.load(open('/tmp/claude_dock_last.json'))['fwd']; assert 0 <= d <= MAX_FWD + 0.05
     d = max(d, float(args[0]) if args else 0.30)
+    MOTION_JOB[0] = True
     pb = cloud(); pb = pb[pb[:, 0] < -0.30]                  # only what is behind: the arms may be in any pose
     need_clear(RM.sweep_hits(pb, CFG, -d, 0.0), 'reversing out')
     rel(-d, 0.0, rear_check=True); setmode(0)
