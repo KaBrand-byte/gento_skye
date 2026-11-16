@@ -10,7 +10,7 @@
 #   demo [GAP]      DRIVE: out of the table -> D1 -> straight towards the conveyor to GAP m (default 0.25),
 #                   stops earlier if robot/arms/tray would touch something            (MOVES, asks y/n)
 #   goto NAME [GAP] [--via none|random|W] [--jitter R]   DRIVE: dock at station NAME (T, D, ...);    (MOVES, asks y/n)
-#                         --via: through a taught waypoint, --jitter: random spot within R m of the safe point
+#                         --via: default random (waypoints / direct equally likely), none = direct, --jitter: random spot within R m of the safe point
 #   tune NAME KEY VALUE   fine-tune: gap (m) | lat_offset (m, + = further left) | yaw_offset (deg, + = left)
 #   teach NAME            record the current lateral position as station NAME (turns a little, asks y/n)
 #   teach-pose NAME [BACK] [left|right]   NO MOTION: robot stands EXACTLY at the final pose of NAME (driven
@@ -31,7 +31,7 @@
 #                  T -> Enter -> D -> place -> reverse out -> arms to carry pose -> back to T
 #                  args e.g. --cycles 10 (10 runs in a row, stops at a failure) | --down-mm 120 | --no-return
 #                  --holding: tray still in the grippers after a stop: no opening, straight to D, place, back
-#                  --random-route: random waypoint + random spot near the safe points (demo route variation)
+#                  --random-route: also a random spot near the safe points (waypoints are random by default)
 #   task-attach    re-attach to the running task (after a Wi-Fi drop); Ctrl-b d detaches, task keeps running
 #   task-stop      Ctrl-C to the task (stops arms + chassis) and software-stop the chassis
 #   task-check     no motion: task config + SDK version on the Orin

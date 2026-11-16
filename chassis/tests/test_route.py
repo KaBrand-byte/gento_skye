@@ -35,7 +35,18 @@ class WaypointTests(unittest.TestCase):
         rng = random.Random(1)
         picks = [RT.choose_via(T["staging_pose"], D["staging_pose"], WPS, "random", rng)[0] for _ in range(200)]
         self.assertEqual(set(picks), {None, "W1"})
-        self.assertTrue(0.75 < picks.count("W1") / 200 < 0.95)
+        self.assertTrue(0.4 < picks.count("W1") / 200 < 0.6)          # W1 or direct, equally likely
+
+    def test_site_layout_three_equal_choices_both_ways(self):
+        # the taught site (2026-11-16, map 3): W1 / W2 on either side of an obstacle between the safe points
+        t_safe, d_safe = (1.263, 1.808), (3.054, -0.852)
+        site = {"W1": {"pose": [3.799, 0.502, 118.4]}, "W2": {"pose": [2.437, -0.08, -64.2]}}
+        rng = random.Random(4)
+        for a, b in ((t_safe, d_safe), (d_safe, t_safe)):
+            self.assertEqual(RT.eligible(a, b, site), ["W1", "W2"])
+            picks = [RT.choose_via(a, b, site, "random", rng)[0] for _ in range(3000)]
+            for k in ("W1", "W2", None):
+                self.assertTrue(0.30 < picks.count(k) / 3000 < 0.37, (k, picks.count(k)))
 
     def test_random_without_waypoints_is_direct(self):
         self.assertIsNone(RT.choose_via((0, 0), (3, 0), {}, "random")[0])

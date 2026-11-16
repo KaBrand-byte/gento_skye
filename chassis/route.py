@@ -1,9 +1,10 @@
 """Route variation for the demo (no ROS here: pure geometry, tested offline in chassis/tests/test_route.py).
 
 The vendor navigation plans the same shortest path every time.  Two ways to make trips differ:
-  1. waypoints  - safe points taught by hand in open areas (waypoints.json, `teach-waypoint NAME`); a trip goes
-                  through one of them, chosen at random, or straight to the destination.  Only waypoints that do
-                  not make the trip much longer and are not right next to the start or the destination qualify.
+  1. waypoints  - points taught by hand (waypoints.json, `teach-waypoint NAME`); every trip picks with EQUAL
+                  probability one of the qualifying waypoints or the direct route (2 waypoints: 1/3 each).  This
+                  is the default of every goto (--via none switches it off).  Only waypoints that do not make the
+                  trip much longer and are not right next to the start or the destination qualify.
   2. jitter     - the vendor navigation drives to a random spot within JITTER m of the taught safe point; the
                   final docking is unchanged (lidar / reference scan).  For lidar (face) stations the spot stays
                   inside the envelope from which the docking works (behind the final pose, within reach).
@@ -12,7 +13,6 @@ Everything here only PICKS targets; all motion and every clearance check stays i
 import json, math, os, random
 
 WAYPOINT_FILE = 'waypoints.json'
-VIA_P = 0.85             # --via random: chance of going through a waypoint at all
 VIA_MAX_DETOUR = 1.5     # via-path length <= direct * this + VIA_EXTRA
 VIA_EXTRA = 0.8         # m
 VIA_MIN_DIST = 0.8       # m: a waypoint this close to the start or the destination adds nothing
@@ -60,9 +60,8 @@ def choose_via(start, dest, waypoints, mode, rng=random):
     ok = eligible(start, dest, waypoints)
     if not ok:
         return None, 'direct (no suitable waypoint between start and destination)'
-    if rng.random() >= VIA_P:
-        return None, 'direct (random choice)'
-    return rng.choice(ok), 'random choice among %s' % ', '.join(ok)
+    pick = rng.choice(ok + [None])                    # each waypoint and the direct route equally likely
+    return pick, 'random choice among %s and direct' % ', '.join(ok)
 
 
 def in_face_envelope(xy, st, front, max_fwd, lat_max, max_dist=2.1):

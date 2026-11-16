@@ -172,7 +172,7 @@ Orin（nvidia）  ~/gento_skye                       底盘 S100（sunrise）  ~
 - **新地图（3 号，2026-11-16）**：D、T 已重标（D：距传送带 0.18 m、`accept` 1 个点；T：安全点在 T 前方 0.58 m，倒车进 T）。T 车尾后约 16 cm 有固定物，倒车超声波阈值改为 0.10 m（`GENTO_REAR_MIN`）。`locmatch.py` 自动读取厂家当前地图（已部署）。待办：开机热点和充电点坐标换成新地图的；部署下面几项后跑 `goto` 和完整任务。
 - **2026-11-16 新地图完整任务实测：成功**。启动（接到任务后离站）输入 → 规划 147 ms、→ 开始运动 394 ms；全部 19 个命令输入 → 规划都 < 1.2 s（最慢 1128 ms，D 站进场）。记录见 [docs/runs/2026-11-16-full-task.md](docs/runs/2026-11-16-full-task.md)。
 - **规划时延（要求 < 1.2 s，已部署 6bc5c5f）**：每次动作命令记录“输入 → 命令”毫秒数（日志 + `latency_log.csv`），`gento bench D|T` 不动车逐项计时；参照扫描法线、扫描匹配、转身 / 平移检查已提速。见 `docs/chassis-navigation.md` 6.3a。
-- **路线变化（已写好，未部署、未实车测试）**：`gento task --random-route` 每趟随机经过一个途经点（`teach-waypoint W1` 等，存在底盘 `waypoints.json`）或直达，并在安全点附近 0.08 m 内随机取点；最终停靠不变，随机点不能转身或进场被挡时先回示教的安全点。见 `docs/chassis-navigation.md` 6.3 节；代码在 `chassis/route.py`（离线测试 `chassis/tests/test_route.py`）和 `dock.py`。
+- **路线变化（默认开启，已部署）**：每次 `goto` / 完整任务在 W1 / W2 / 直达之间等概率随机（W1、W2 分别在 T、D 之间路障的两侧）；`--via none` 关闭。见 `docs/chassis-navigation.md` 6.3 节。
 
 ## 9. 安全约定（今天的经验）
 

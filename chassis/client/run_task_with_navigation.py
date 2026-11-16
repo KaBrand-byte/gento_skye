@@ -392,8 +392,8 @@ def main(argv=None):
     p.add_argument("--no-return", action="store_true", help="放置后不返回起始点")
     p.add_argument("--selfscan", action="store_true", help="准备完成后先测手臂／托盘占位（车前约 1 m 需无物体）")
     p.add_argument("--random-route", action="store_true",
-                   help="演示用路线变化：随机经过一个示教的途经点 + 在安全点附近随机偏移（最终停靠精度不变）")
-    p.add_argument("--via", help="途经点：none | random | 途经点名（如 W1）")
+                   help="另外在安全点附近随机偏移 0.08 m（途经点的随机选择本来就默认开启）")
+    p.add_argument("--via", help="途经点：默认 random（各途经点和直达等概率）| none 不经过途经点 | 途经点名（如 W1）")
     p.add_argument("--jitter", type=float, help="安全点随机偏移半径 m（0–0.20；--random-route 默认 0.08）")
     p.add_argument("--nav-timeout", type=float, default=600.0)
     p.add_argument("--poll", type=float, default=0.5)

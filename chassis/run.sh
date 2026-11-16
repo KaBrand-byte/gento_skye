@@ -5,8 +5,8 @@
 #                           (default 0.25) from the current lateral position; stops early where the
 #                           robot/arms/tray would touch something                                       (MOVES)
 #   run.sh goto NAME [GAP] [--via none|random|W] [--jitter R]  dock at station NAME of stations.json (used by
-#                           the skye_task adapter); --via: through a waypoint, --jitter: random spot within R m
-#                           of the safe point (route variation for demos)                              (MOVES)
+#                           the skye_task adapter); route: each taught waypoint or direct, equally likely
+#                           (default random; --via none = direct), --jitter: random spot near the safe point (MOVES)
 #   run.sh demo-dry [GAP]   same checks as demo, no motion
 #   run.sh stop             software stop (kill job, cancel moves/tasks, soft manual)
 #   run.sh status           state, tasks, running job, last log lines

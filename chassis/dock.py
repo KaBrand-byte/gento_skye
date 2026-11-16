@@ -26,7 +26,7 @@ CFG = RM.load()
 WP_FILE = os.path.join(HERE, RT.WAYPOINT_FILE)
 WAYPOINT_TOL = 0.35     # m: a waypoint only shapes the route - close enough is reached
 WAYPOINT_TMO = 90       # s: not reached by then -> cancel and drive straight to the destination
-VIA = ['none']          # --via none|random|NAME
+VIA = ['random']        # --via none|random|NAME: goto picks W1 / W2 / ... / direct at random (default)
 JITTER = [0.0]          # --jitter R: navigate to a random spot within R m of the taught safe point
 
 FRONT = 0.338          # chassis centre -> front edge
@@ -1424,7 +1424,7 @@ elif cmd in ('dock', 'redock'):
             log('route: safe point %s (%.3f, %.3f), %.2f m from the taught one'
                 % ('jittered to' if jittered else 'kept at', target[0], target[1],
                    math.hypot(target[0] - st['staging_pose'][0], target[1] - st['staging_pose'][1])))
-        if target and VIA[0] != 'none':
+        if target and VIA[0] != 'none' and '--lineup' not in sys.argv:
             # route variation 1: through a taught waypoint (random or named)
             x0, y0, _ = map_pose(); wps = RT.load_waypoints(WP_FILE)
             try:

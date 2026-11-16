@@ -8,7 +8,7 @@
 #   bench T|D  planning time of each docking step on one lidar snapshot    (no motion; limit 1.2 s)
 #   latency [N]  timed report of the last N jobs (input -> plan -> command -> motion; start-up marked)
 #   goto NAME [GAP] [--via none|random|W] [--jitter R]   DRIVE: dock at station NAME (T, D, ...)  (asks y/n)
-#                         --via: through a taught waypoint, --jitter: random spot within R m of the safe point
+#                         --via: default random (waypoints / direct equally likely), none = direct, --jitter: random spot within R m of the safe point
 #   lineup NAME           DRIVE: like goto, but stop lined up in front of NAME before driving in  (asks y/n)
 #   undock                DRIVE: reverse straight out along the last docking approach              (asks y/n)
 #   tune NAME KEY VALUE   fine-tune: gap (m) | lat_offset (m, + = further left) | yaw_offset (deg, + = left)
@@ -25,7 +25,7 @@
 #   log        follow the job log (Ctrl+C to leave; the job keeps running)
 #   task [args]    START THE FULL TASK (arms + navigation) in tmux on the Orin           (asks y/n)
 #                  args e.g. --cycles 10 | --down-mm 120 | --holding | --no-return | --start ''
-#                  --random-route: random waypoint + random spot near the safe points (route variation)
+#                  --random-route: also a random spot near the safe points (waypoints are random by default)
 #   task-attach    show the running task again (Ctrl-b d detaches; the task keeps running)
 #   task-stop      stop the task (arms + chassis) and software-stop the chassis
 #   task-check     no motion: task config + SDK version on the Orin
