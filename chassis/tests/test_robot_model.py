@@ -70,5 +70,18 @@ class PrefilterTests(unittest.TestCase):
         self.assertIsNone(RM.sweep_hits(far, self.cfg, 0.5, 0.0))
 
 
+
+class RemoveSelfCacheTests(unittest.TestCase):
+    def test_cache_returns_the_result_for_that_array_only(self):
+        cfg = RM.load(); rng = np.random.default_rng(3)
+        a = np.column_stack([rng.uniform(-1, 1, 5000), rng.uniform(-1, 1, 5000), rng.uniform(0, 2, 5000)])
+        b = a + np.array([0.3, 0.0, 0.0])
+        ra = RM.remove_self(a, cfg)
+        self.assertIs(RM.remove_self(a, cfg), ra)                       # same snapshot: computed once
+        np.testing.assert_array_equal(RM.remove_self(b, cfg), RM._remove_self(b, cfg))
+        np.testing.assert_array_equal(RM.remove_self(a, cfg), RM._remove_self(a, cfg))
+        self.assertEqual(len(RM.remove_self(a, cfg, 'carry')), len(ra))
+
+
 if __name__ == "__main__":
     unittest.main()

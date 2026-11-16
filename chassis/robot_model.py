@@ -106,13 +106,26 @@ def self_mask(p, cfg, margin, phase='carry'):
     return inside
 
 
-def remove_self(p, cfg, phase='carry'):
+def _remove_self(p, cfg, phase='carry'):
     """Drop lidar points that are the robot itself (inside its own boxes at the current pose) and the floor."""
     keep = np.ones(len(p), bool)
     for _, b in boxes(cfg, phase):
         keep &= ~_inside(p, b, cfg['margin'] + 0.02)   # must exceed the collision margin, or the robot "hits itself"
     return p[keep & (p[:, 2] > 0.04)]
 
+
+
+_RS = {'p': None, 'cfg': None, 'phase': None, 'out': None}
+
+
+def remove_self(p, cfg, phase='carry'):
+    """Cached for the last array: every check on one lidar snapshot used to recompute it (~60 ms each on the
+    chassis).  Same object, model and phase -> same result; arrays are never modified in place here."""
+    if _RS['p'] is p and _RS['cfg'] is cfg and _RS['phase'] == phase:
+        return _RS['out']
+    out = _remove_self(p, cfg, phase)
+    _RS.update(p=p, cfg=cfg, phase=phase, out=out)
+    return out
 
 def _report(p, sel, what):
     hits = p[sel]

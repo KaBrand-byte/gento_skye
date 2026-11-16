@@ -422,7 +422,14 @@ def lat_error(m, st, gap):
     ye = end_y(m, st['side'], expected_end(st))
     taught = _face_lateral(-YAW_OFF[0], FRONT + st['gap'], st['end_y'])
     now = _face_lateral(m['err'], m['dist'], ye) + (m['dist'] - FRONT - gap) * math.sin(m['err'])
-    return (now - taught) / math.cos(m['err'])
+    return (now - taught) / math.cos(m['err']) + LAT_BIAS[0]
+
+
+# Stations with a reference scan: at the safe point the face-end lateral is calibrated against the reference
+# match (seeded by the map pose), so the first sideways move already goes to the right place.  Measured at D on
+# the new map: the face end gave -0.04 m, the reference +0.26 m (and the reference was right) - the robot went
+# back and forth.
+LAT_BIAS = [0.0]
 
 
 STAGE2 = 0.30          # m: the last part of a long approach is driven after a fresh measurement
@@ -443,6 +450,36 @@ def sideways_small(dy, st, fwd):
     log('sideways correction %.3f m (%s)' % (dy, ' then '.join('%.3f' % s_ for s_ in steps)))
     for s_ in steps:
         rel(0.0, 0.0, y=s_)
+
+
+FINAL_X_TOL = 0.008     # m: remaining distance to the taught pose (reference scan) corrected after the last stage
+FINAL_X_MAX = 0.05      # m: larger remainders are not "a short last move" - left alone (reported in FINAL)
+
+
+def final_forward_fix(name, st):
+    """After the last stage: the chassis stops short by ~1-1.5 cm on some floors (D, new map: 3 runs, 0.9-1.5 cm
+    left by the reference scan).  Drive the remainder; below ~2 cm the chassis ignores a move, so back off 3 cm
+    first and drive 3 cm + the remainder.  Too close is left alone (no extra move towards the face).  Returns the
+    net forward distance added."""
+    try:
+        rx, ry, ra = ref_offset(name)
+    except SystemExit as e:
+        log('final check: no reference match (%s) - no correction' % e)
+        return 0.0
+    if not FINAL_X_TOL < rx <= FINAL_X_MAX:
+        log('final check: %.3f m to the taught pose - no correction' % rx)
+        return 0.0
+    p = accepted_filter(RM.remove_self(cloud(), CFG), st, 0.0, 0.0)
+    steps = [rx] if rx >= SIDE_MIN else [-0.03, 0.03 + rx]
+    off = 0.0
+    for d in steps:
+        if d > 0:
+            need_clear(RM.sweep_hits(p - np.array([off, 0.0, 0.0]), CFG, d, 0.0), 'final forward correction')
+        off += d
+    log('final forward correction %.3f m (%s)' % (rx, ' then '.join('%.3f' % d for d in steps)))
+    for d in steps:
+        rel(d, 0.0, rear_check=d < 0)
+    return rx
 
 
 def measure_station(st, gap, expect_dist):
@@ -741,9 +778,10 @@ def _normals_xy(ref, radius=0.06):
 ICP_MAX_SRC = 6000      # scan points used by the ICP (random subset): enough for 3 parameters, ~3x faster
 
 
-def icp2d(src, ref, max_d=0.30, iters=30, nrm=None, tree=None):
+def icp2d(src, ref, max_d=0.30, iters=30, nrm=None, tree=None, seed=None):
     """Trimmed point-to-plane ICP on 3-D points, solving only the planar motion (x, y, yaw):
-    (R, t, rms, inlier fraction) with ref_xy ~ R @ src_xy + t, or None."""
+    (R, t, rms, inlier fraction) with ref_xy ~ R @ src_xy + t, or None.  seed: (dx, dy, dyaw) still to go to
+    the reference pose (robot frame), e.g. from the map, as the starting estimate."""
     from scipy.spatial import cKDTree
     if nrm is None:
         nrm = _normals_xy(ref)
@@ -751,6 +789,9 @@ def icp2d(src, ref, max_d=0.30, iters=30, nrm=None, tree=None):
     if len(src) > ICP_MAX_SRC:
         src = src[np.random.default_rng(0).choice(len(src), ICP_MAX_SRC, replace=False)]
     tree = tree if tree is not None else cKDTree(ref); th = 0.0; t = np.zeros(2); rms = None; frac = 0.0
+    if seed is not None:
+        th = -float(seed[2]); c0, s0 = math.cos(th), math.sin(th)
+        t = -np.array([[c0, -s0], [s0, c0]]) @ np.array([float(seed[0]), float(seed[1])])
     for _ in range(iters):
         c, s_ = math.cos(th), math.sin(th); R = np.array([[c, -s_], [s_, c]])
         sx = src[:, :2] @ R.T + t
@@ -791,10 +832,10 @@ def ref_data(name):
     return _REF_NRM[name]
 
 
-def ref_offset(name):
+def ref_offset(name, seed=None):
     """(dx, dy, dyaw) in the robot frame from here to the pose where the reference scan of `name` was taken."""
     _, ref, nrm, tree = ref_data(name)
-    r = icp2d(scan2d(), ref, nrm=nrm, tree=tree)
+    r = icp2d(scan2d(), ref, nrm=nrm, tree=tree, seed=seed)
     if r is None:
         raise SystemExit('ABORT: the scan does not match the reference of %s (too few common points)' % name)
     R, t, rms, frac = r; th = math.atan2(R[1, 0], R[0, 0])
@@ -861,6 +902,17 @@ def map_approach(name, st, dry):
                                  err_yaw_deg=round(math.degrees(da), 2), pose=[round(v, 3) for v in map_pose()[:2]])))
 
 
+LEAVE_MIN = 0.06       # m: the safe point is only a place to turn (STAGING_TOL 0.35): smaller pieces are skipped
+
+
+def rough(dx, dy):
+    """The way back to a safe point without its tiny components (each one is a separate stop-and-go move)."""
+    rx_, ry_ = (dx if abs(dx) >= LEAVE_MIN else 0.0), (dy if abs(dy) >= LEAVE_MIN else 0.0)
+    if (rx_, ry_) != (dx, dy):
+        log('  leaving: skipping the small part (x %.3f, y %.3f) - the safe point needs no precision' % (dx - rx_, dy - ry_))
+    return rx_, ry_
+
+
 def leave_map_station():
     """At a map station (robot within 0.3 m / 20 deg of its pose): go back to its safe point the way the docking
     came in (straight translation), so the next navigation starts where turning is clear."""
@@ -871,7 +923,7 @@ def leave_map_station():
         if math.hypot(dx, dy) < 0.3 and abs(da) < math.radians(20):
             sx, sy, _ = rel_target(st['staging_pose'])
             log('at map station %s: back to its safe point first (x %.2f, y %.2f)' % (nm, sx, sy))
-            translate(sx, sy)
+            translate(*rough(sx, sy))
             return True
     # lidar station after undock (e.g. D): on its approach line, facing it, within reach of its safe point -
     # go back to the safe point (the reverse of the approach's sideways move): room to turn there, unlike in
@@ -889,7 +941,7 @@ def leave_map_station():
             if math.hypot(sx, sy) > 1.6:
                 continue
             log('in front of %s: to its safe point first (x %.2f, y %.2f)' % (nm, sx, sy))
-            translate(sx, sy)
+            translate(*rough(sx, sy))
             return True
     return False
 
@@ -946,12 +998,48 @@ def cancel_all_tasks():
         f = c.call_async(CancelAllTask.Request()); rclpy.spin_until_future_complete(n, f, timeout_sec=3)
 
 
+class NavTrace:
+    """Pose samples during a vendor navigation: logs a line every 2 s and, at the end, the pauses (standing
+    still > 0.6 s on the way) and reversals (driving backwards), to see where the navigation hesitates."""
+    def __init__(self):
+        self.s = []; self.t_log = 0.0
+
+    def add(self):
+        if _POSE[0] is None:
+            return
+        p = _POSE[0].pose; t = time.time(); self.s.append((t, p.position.x, p.position.y, p.orientation.z))
+        if t - self.t_log >= 2.0:
+            self.t_log = t
+            log('NAV pose (%.2f, %.2f, %.0f deg)' % (p.position.x, p.position.y, math.degrees(p.orientation.z)))
+
+    def summary(self):
+        s = self.s
+        if len(s) < 3:
+            return
+        pauses = []; rev = 0; dist = 0.0; still_from = None; moved = False
+        for (t0, x0, y0, h0), (t1, x1, y1, h1) in zip(s, s[1:]):
+            dt = max(t1 - t0, 1e-3); dx, dy = x1 - x0, y1 - y0; d = math.hypot(dx, dy); dist += d
+            dh = abs((h1 - h0 + math.pi) % (2 * math.pi) - math.pi)
+            if d / dt < 0.02 and dh / dt < math.radians(3):
+                still_from = still_from or t0
+            else:
+                if moved and still_from and t0 - still_from > 0.6:
+                    pauses.append((still_from, t0 - still_from))
+                still_from = None; moved = True
+                if d > 0.01 and dx * math.cos(h0) + dy * math.sin(h0) < -0.005:
+                    rev += 1
+        log('NAV summary: %.1f s, %.2f m driven, %d pauses on the way%s, %d backwards samples' % (
+            s[-1][0] - s[0][0], dist, len(pauses),
+            (' (' + ', '.join('%s %.1f s' % (stamp(a), b) for a, b in pauses[:6]) + ')') if pauses else '', rev))
+
+
 def wait_task(tmo=150, near=None, tol=STAGING_TOL):
     """Wait until the navigation task is gone.  The vendor server keeps a station task open when the robot
     stops a few cm off the node ("Current Pos Without Node"); so if we are within `tol` of the staging point
     and have not moved for 1.5 s, treat it as arrived and cancel the dangling task ourselves."""
     import urllib.request
     t0 = time.time(); last = None; still = time.time(); mw = NAV_WATCH[0]; NAV_WATCH[0] = None
+    tr = NavTrace()
     while time.time() - t0 < 0.5:
         rclpy.spin_once(n, timeout_sec=0.05)
         if mw:
@@ -960,16 +1048,17 @@ def wait_task(tmo=150, near=None, tol=STAGING_TOL):
         q = urllib.request.Request('http://127.0.0.1:8080/api/Task/GetAllTask', data=b'{}',
                                    headers={'Content-Type': 'application/json'})
         if not json.load(urllib.request.urlopen(q, timeout=5))['Content']:
-            return True
+            tr.summary(); return True
         if mw:
             mw.poll()
+        tr.add()
         if near:
             x, y, yaw = map_pose()
             if last is None or math.hypot(x - last[0], y - last[1]) > 0.005 or abs(yaw - last[2]) > 0.005:
                 still = time.time(); last = (x, y, yaw)
             if math.hypot(x - near[0], y - near[1]) < tol and time.time() - still > 1.5:
                 log('arrived %.3f m from staging but the server keeps the task open: cancelling it' % math.hypot(x - near[0], y - near[1]))
-                cancel_all_tasks(); return True
+                tr.summary(); cancel_all_tasks(); return True
         for _ in range(10):
             rclpy.spin_once(n, timeout_sec=0.05)
             if mw:
@@ -1360,6 +1449,22 @@ elif cmd in ('dock', 'redock'):
         raise SystemExit('ABORT: no face found ahead')
     log('staging measure', pub(m))
     m = align_heading(m, dry)
+    if (cmd == 'dock' and not dry and '--lineup' not in sys.argv and '--here' not in sys.argv and 'pose' in st
+            and os.path.exists(os.path.join(REF_DIR, name + '.npy'))):
+        face_dy = lat_error(m, st, gap)
+        try:
+            sd = rel_target(st['pose'])                              # map: good to a few cm here
+            rx, ry, ra = ref_offset(name, seed=sd)
+            fwd0 = m['dist'] - FRONT - gap
+            if abs(rx - fwd0) <= 0.10 and abs(ry - sd[1]) <= 0.10:      # map good to ~5 cm here
+                LAT_BIAS[0] = ry - face_dy
+                log('lateral from the reference scan: %.3f m (face edge: %.3f, map: %.3f) - using the reference'
+                    % (ry, face_dy, sd[1]))
+            else:
+                log('reference match at the safe point not consistent (x %.3f vs face %.3f, y %.3f vs map %.3f) - '
+                    'lateral from the face edge' % (rx, fwd0, ry, sd[1]))
+        except SystemExit as e:
+            log('reference match at the safe point failed (%s) - lateral from the face edge' % e)
     if jittered and '--lineup' not in sys.argv:
         # from the jittered spot the approach may be blocked where it is clear from the taught one: check
         # (no motion) and fall back to the taught safe point instead of stopping
@@ -1461,6 +1566,7 @@ elif cmd in ('dock', 'redock'):
         need_clear(RM.sweep_hits(accepted_filter(RM.remove_self(cloud(), CFG), st, fwd, 0.0), CFG, fwd, 0.0), 'last stage')
         log('last stage: forward %.3f m' % fwd)
         rel(fwd + FWD_SHORT_LAST, 0.0); total += fwd + FWD_SHORT_LAST
+        total += final_forward_fix(name, st)
         YLIM[0] = 2.5; f = measure(near=True)
         res = dict(name=name, gap_target=gap, gap=f['gap'] if f else None, ang_deg=f['ang_deg'] if f else None, fwd=round(fwd, 4))
         try:
