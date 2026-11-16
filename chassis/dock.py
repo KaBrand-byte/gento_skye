@@ -1313,6 +1313,15 @@ elif cmd == 'accept':
     m = min(cands, key=lambda c: abs(lat_error(c, dict(s0, end_y=target), s0['gap'])))
     dy = lat_error(m, dict(s0, end_y=target), s0['gap']); e = m['err'] + YAW_OFF[0]
     fwd = m['dist'] - FRONT - s0['gap']
+    if os.path.exists(os.path.join(REF_DIR, name + '.npy')) and 'pose' in s0:
+        # stations whose face edge is not reliable (D): sideways / heading from the reference scan
+        try:
+            rx, ry, ra = ref_offset(name, seed=rel_target(s0['pose']))
+            if abs(rx - fwd) <= 0.10:
+                log('reference scan: sideways %.3f m, heading %.2f deg (face edge said %.3f m)' % (ry, math.degrees(ra), dy))
+                dy, e = ry, ra
+        except SystemExit as ex:
+            log('reference scan not usable here (%s) - face edge' % ex)
     log('face', pub(m), '| sideways %.3f m, heading %.2f deg, forward %.3f m to the final pose' % (dy, math.degrees(e), fwd))
     if abs(dy) > 0.03 or abs(e) > math.radians(1.5) or not -0.02 <= fwd <= MAX_FWD:
         raise SystemExit('ABORT: not lined up on the approach line of %s - run goto (it lines up before driving in)' % name)
@@ -1472,7 +1481,8 @@ elif cmd in ('dock', 'redock'):
         raise SystemExit('ABORT: no face found ahead')
     log('staging measure', pub(m))
     m = align_heading(m, dry)
-    if (cmd == 'dock' and not dry and '--lineup' not in sys.argv and '--here' not in sys.argv and 'pose' in st
+    ref_lat = None                              # sideways to the taught pose from the reference scan (if trusted)
+    if (cmd == 'dock' and not dry and '--here' not in sys.argv and 'pose' in st
             and os.path.exists(os.path.join(REF_DIR, name + '.npy'))):
         face_dy = lat_error(m, st, gap)
         try:
@@ -1480,7 +1490,7 @@ elif cmd in ('dock', 'redock'):
             rx, ry, ra = ref_offset(name, seed=sd)
             fwd0 = m['dist'] - FRONT - gap
             if abs(rx - fwd0) <= 0.10 and abs(ry - sd[1]) <= 0.10:      # map good to ~5 cm here
-                LAT_BIAS[0] = ry - face_dy
+                LAT_BIAS[0] = ry - face_dy; ref_lat = ry
                 log('lateral from the reference scan: %.3f m (face edge: %.3f, map: %.3f) - using the reference'
                     % (ry, face_dy, sd[1]))
             else:
@@ -1500,6 +1510,21 @@ elif cmd in ('dock', 'redock'):
             if not m:
                 raise SystemExit('ABORT: no face found ahead')
             m = align_heading(m, dry)
+    if '--lineup' in sys.argv and ref_lat is not None:
+        # the face edge is not trusted here (see LAT_BIAS): line up with the reference scan, one sideways move
+        fwd0 = m['dist'] - FRONT - gap
+        sideways_small(ref_lat, st, fwd0)                       # checked against the live cloud
+        sd = rel_target(st['pose'])
+        try:
+            rx, ry, ra = ref_offset(name, seed=sd)
+            log('lined up by the reference scan: still x %.3f y %.3f yaw %.2f deg to the taught pose'
+                % (rx, ry, math.degrees(ra)))
+        except SystemExit as e:
+            log('after lining up: %s' % e)
+        log('STAGE-ONLY: lined up in front of %s (reference scan), %.3f m before the final pose (not driven in)'
+            % (name, m['dist'] - FRONT - gap))
+        setmode(0)
+        raise SystemExit(0)
     if '--stage-only' in sys.argv:                            # e.g. place pose not taught yet: stop at staging
         log('STAGE-ONLY: stopped at staging, facing the face', pub(m))
         if not dry:
