@@ -169,7 +169,7 @@ Orin（nvidia）  ~/gento_skye                       底盘 S100（sunrise）  ~
   7. 手臂姿态变化后：在空旷处夹着托盘 `gento selfscan`。
 - **验收前建议**：按第 7 节第 4 条调整厂家避障；安全点选在不会摆障碍物的地方；每次演示前做一次只读全检。
 - **场地改动（2026-11-16）**：放置位置变了、路上加了障碍物，端盘和运输动作也在改（`config/default.json`，由 `skye_task` 维护者修改）。顺序：场地摆定 → （障碍物固定的话）厂家重新建图、`gento relocate`、重设开机热点 → 动作定稿 → 空旷处夹着托盘 `gento selfscan`，按新托盘和放置距离更新 `robot_model.json` 的 `tray` / `place_motion`，必要时调整任务脚本 → 重标 D（`teach-pose`、`teach-staging`、`teach-ref`，需要时 `lineup` + `accept`）和 T（`teach-staging T map`、`teach-ref T`）→ 示教途经点 → `goto` 往返 → `gento task` → `--cycles 10`。旧数据在备份仓库 `robot-data` 分支和底盘的 `.bak-*` 文件中。
-- **新地图（3 号，2026-11-16）**：D、T 已重标（D：距传送带 0.18 m 示教，2026-11-16 按现场放置结果 `tune D gap 0.1005` 再往前 8 cm，最后的参照扫描检查因此显示约 −0.08 m、不再补走；`accept` 1 个点；T：安全点在 T 前方 0.58 m，倒车进 T）。T 车尾后约 16 cm 有固定物，倒车超声波阈值改为 0.10 m（`GENTO_REAR_MIN`）。`locmatch.py` 自动读取厂家当前地图（已部署）。待办：开机热点和充电点坐标换成新地图的；部署下面几项后跑 `goto` 和完整任务。
+- **新地图（3 号，2026-11-16）**：D、T 已重标（D：距传送带 0.18 m 示教，2026-11-16 按现场放置结果先 `tune D gap 0.1005`（前移 8 cm），再 `tune D gap 0.0505`（再前移 5 cm）；最后的参照扫描检查因此显示为负值、不再补走；`accept` 1 个点；T：安全点在 T 前方 0.58 m，倒车进 T）。T 车尾后约 16 cm 有固定物，倒车超声波阈值改为 0.10 m（`GENTO_REAR_MIN`）。`locmatch.py` 自动读取厂家当前地图（已部署）。待办：开机热点和充电点坐标换成新地图的；部署下面几项后跑 `goto` 和完整任务。
 - **2026-11-16 新地图完整任务实测：成功**。启动（接到任务后离站）输入 → 规划 147 ms、→ 开始运动 394 ms；全部 19 个命令输入 → 规划都 < 1.2 s（最慢 1128 ms，D 站进场）。记录见 [docs/runs/2026-11-16-full-task.md](docs/runs/2026-11-16-full-task.md)。
 - **规划时延（要求 < 1.2 s，已部署 6bc5c5f）**：每次动作命令记录“输入 → 命令”毫秒数（日志 + `latency_log.csv`），`gento bench D|T` 不动车逐项计时；参照扫描法线、扫描匹配、转身 / 平移检查已提速。见 `docs/chassis-navigation.md` 6.3a。
 - **放置**：双臂下降 135 mm 后升降再下降 50 mm（共 185 mm，`--place-lift-mm`；15、30 mm 时托盘松爪后仍会掉落）。
