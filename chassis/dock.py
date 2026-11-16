@@ -952,6 +952,8 @@ def face_towards(xy, min_deg=15.0):
     is clear with the arms + tray (the vendor's own start turn only sees obstacles below 0.8 m and creeps near
     table legs).  Not clear -> leave the turn to the vendor, as before."""
     x, y, yaw = settled_pose()
+    if math.hypot(xy[0] - x, xy[1] - y) < 0.5:
+        return                  # already there: its direction means nothing (a 2 cm target gave a 60 deg turn)
     d = (math.atan2(xy[1] - y, xy[0] - x) - yaw + math.pi) % (2 * math.pi) - math.pi
     if abs(d) < math.radians(min_deg):
         return
