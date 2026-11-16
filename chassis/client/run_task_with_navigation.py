@@ -37,8 +37,8 @@ ROOT = Path(__file__).resolve().parents[2]
 LINK_RELEASE_S = 2.0
 RANDOM_ROUTE_JITTER = 0.08  # m: --random-route, random spot within this of the taught safe points
 MAX_LIFT_ASSIST_MM = 60.0  # at most this much of the place descent is done by the lift instead of the arms
-PLACE_LIFT_MM = 30.0       # after the arms' descent the lift always lowers at least this much (tray set down on
-                           # the belt, not dropped on release: 15 mm was not enough at D, 2026-11-16)
+PLACE_LIFT_MM = 50.0       # after the arms' descent the lift always lowers at least this much (tray set down on
+                           # the belt, not dropped on release: 15 and 30 mm were not enough at D, 2026-11-16)
 ARM_MARGIN_MM = 10.0       # stay this far inside the arms' planning limit (elbow not near straight)     # the controller refuses a new link (-22) for ~1 s after the previous one was closed
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(Path(__file__).resolve().parent))

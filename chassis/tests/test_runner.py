@@ -175,9 +175,9 @@ class RunnerTests(unittest.TestCase):
         code, report = self.run_trial(extra=["--down-mm", "120"])
         self.assertEqual(code, 0)
         plan = report["metadata"]["place_motion_mm"]
-        self.assertEqual((plan["arm_down"], plan["lift_down"], plan["total_down"]), (120, 30, 150))
+        self.assertEqual((plan["arm_down"], plan["lift_down"], plan["total_down"]), (120, 50, 170))
         lift = [s for s in report["steps"] if s["name"] == "place_lift_down" and s.get("status") == "started"][0]
-        self.assertEqual(lift["target_mm"], runner.load_config(self.cfg).receive_lift[0] - 30)
+        self.assertEqual(lift["target_mm"], runner.load_config(self.cfg).receive_lift[0] - 50)
         code, report = self.run_trial(extra=["--down-mm", "120", "--place-lift-mm", "0"])
         self.assertEqual(report["metadata"]["place_motion_mm"]["lift_down"], 0)
         self.assertFalse(any(s["name"] == "place_lift_down" for s in report["steps"]))
