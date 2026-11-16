@@ -50,6 +50,31 @@ class SshTransportTests(unittest.TestCase):
         self.assertTrue(calls[0].endswith("run.sh goto D --via random --jitter 0.080"), calls[0])
         self.assertTrue(calls[1].endswith("run.sh goto T"), calls[1])
 
+    def test_previous_result_of_the_same_station_is_not_taken_as_arrival(self):
+        # ROS transport: the bridge status can still show the previous "done T" right after goto T is accepted
+        nav = GentoNavigation(transport="ssh")
+        nav.transport = "ros"
+        nav._status_at = 1e18                                   # never stale in this test
+        nav._status = {"job": {"state": "done", "job": "T", "t": 100}}
+        nav._begin("T", nav._peek_job())
+        self.assertFalse(nav.is_arrived_and_stopped())         # the old result
+        nav._status = {"job": {"state": "running", "job": "T", "t": 103}}
+        self.assertFalse(nav.is_arrived_and_stopped())
+        nav._status = {"job": {"state": "done", "job": "T", "t": 112}}
+        self.assertTrue(nav.is_arrived_and_stopped())
+
+    def test_a_new_result_without_seeing_running_still_counts(self):
+        nav = GentoNavigation(transport="ssh")
+        nav.transport = "ros"; nav._status_at = 1e18
+        nav._status = {"job": {"state": "done", "job": "T", "t": 100}}
+        nav._begin("T", nav._peek_job())
+        nav._status = {"job": {"state": "done", "job": "T", "t": 104}}
+        self.assertTrue(nav.is_arrived_and_stopped())
+        nav._status = {"job": {"state": "done", "job": "D", "t": 90}}
+        nav._begin("T", nav._peek_job())                       # different previous job: first T result is ours
+        nav._status = {"job": {"state": "done", "job": "T", "t": 95}}
+        self.assertTrue(nav.is_arrived_and_stopped())
+
     def test_refused_job_raises(self):
         _, patch = self.patch_run(["BUSY: job 42 still running - use stop first\n"])
         with patch, self.assertRaises(NavigationError):

@@ -141,9 +141,22 @@ class GentoNavigation:
         return (self._status or {}).get("pose")
 
     # ---------------------------------------------------------------- Navigation protocol
+    def _peek_job(self):
+        """The chassis job status as last received over ROS, without waiting (None over ssh: there run.sh marks
+        the new job as running before it returns, so no stale result can be read afterwards)."""
+        if self.transport != "ros" or self._status is None:
+            return None
+        return dict(self._status.get("job") or {})
+
+    def _begin(self, destination, baseline):
+        self.active = destination
+        self._seen_active = False
+        self._baseline = baseline
+
     def start(self, destination):
         """Submit a navigation + docking job; the return is not an arrival indication."""
         gap = self.gaps.get(destination)
+        baseline = self._peek_job()
         if self.transport == "ros":
             ack = self._ros_command(cmd="goto", station=destination, gap=gap, **self.route)
             if not ack.get("ok"):
@@ -157,12 +170,12 @@ class GentoNavigation:
             out = self._ssh("goto", destination, *(["%.3f" % gap] if gap is not None else []), *extra)
             if "started job" not in out:
                 raise NavigationError(f"底盘拒绝导航任务: {out.strip()}")
-        self.active = destination
-        self._seen_active = False
+        self._begin(destination, baseline)
 
     def start_undock(self):
         """Reverse straight out along the last docking approach (e.g. after placing, before the arms move).
         Completion is polled like a destination: is_arrived_and_stopped() / raise_if_failed()."""
+        baseline = self._peek_job()
         if self.transport == "ros":
             ack = self._ros_command(cmd="undock")
             if not ack.get("ok"):
@@ -171,19 +184,29 @@ class GentoNavigation:
             out = self._ssh("undock")
             if "started job" not in out:
                 raise NavigationError(f"底盘拒绝后退任务: {out.strip()}")
-        self.active = "undock"
-        self._seen_active = False
+        self._begin("undock", baseline)
 
     def _current(self):
         """Status of the job we started.  Until the chassis has reported our job once, any other job's result
         (e.g. a stale "stopped" left by the previous run) is ignored and reads as still starting."""
         status = self.job_status()
-        if status.get("job") == self.active:
+        if status.get("job") == self.active and self._is_ours(status):
             self._seen_active = True
             return status
         if self._seen_active and status.get("job") == "stopped":
             return status                       # our job was stopped (run.sh stop) after it had started
         return {"state": "starting", "job": self.active}
+
+    def _is_ours(self, status):
+        """A result with the same job name can still be the PREVIOUS job's (e.g. goto T while already at T): the
+        bridge's status lags the new job by up to ~1 s (2026-11-16: an old "done T" was taken as arrival 8 s
+        before the new docking ended).  Ours once it is running, or newer than the status seen at the start."""
+        if self._seen_active or status.get("state") == "running":
+            return True
+        base = getattr(self, "_baseline", None)
+        if not base or base.get("job") != status.get("job"):
+            return True
+        return base.get("t") is not None and status.get("t") is not None and status["t"] > base["t"]
 
     def is_arrived_and_stopped(self):
         """True only after the docking job finished successfully (docked and standing still)."""
