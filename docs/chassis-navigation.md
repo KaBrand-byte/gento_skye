@@ -248,6 +248,8 @@ Host chassis
 
 每次发出动作命令（相对移动或厂家导航任务）时，日志记一行 `plan latency N ms (input -> ...)`：从最新一次输入（激光快照、稳定后的地图位姿）到命令发出的时间，超过 1200 ms 标 `OVER`；同时追加到底盘 `~/gento_dock/latency_log.csv`。不计程序启动和抓取数据的时间。
 
+每行日志带毫秒时间戳 `[时:分:秒.毫秒 已用秒数]`，规划相关的事件：`LIDAR scan start`（开始抓点云）→ `INPUT ready`（点云构建完成 / 定位稳定）→ `PLAN start`（开始规划）→ `PLAN done … input -> plan N ms`（规划完成）→ `COMMAND accepted … input -> command N ms`（底盘接受命令，含切换控制模式、解除驻车）→ `MOTION started … input -> motion N ms`（地图位姿开始变化 > 1 cm / 0.5°）。`gento latency [N]`（底盘 `run.sh latency`，`latency_report.py`）把最近 N 个任务整理成表，标出每个任务的**启动**（第一个命令，例如在 T 接到任务后离站去 D）是否满足 1.2 s。
+
 `gento bench D`（或 `T`，车不动）：取一帧激光快照，逐项计时停靠中的每个规划步骤（能否原地转身、离站平移、45° 转身、直线进退、侧移、传送带对边、进场计划、参照扫描匹配），给出最慢一步。
 
 2026-11-16 的优化（结果与原算法逐点一致，离线测试 `chassis/tests/test_robot_model.py`）：参照扫描的法线改为向量化计算并在停靠开始时准备好（D 站原来约 4 s，现在约 0.1 s，电脑上）；扫描匹配只用 6000 个随机点（约快 2 倍）；转身 / 平移检查先剔除够不着的点（45° 转身 0.79 → 0.10 s）。电脑上每个规划步骤都在 0.15 s 以内，底盘上的实测值用 `gento bench` 取得。

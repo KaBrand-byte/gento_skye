@@ -30,6 +30,7 @@
 #   run.sh selfscan         measure arms/tray with the lidar and store them (no motion)
 #   run.sh check NAME       what docking at NAME would do from here (no motion)
 #   run.sh bench [NAME]     planning time per step on one lidar snapshot (no motion; requirement < 1.2 s)
+#   run.sh latency [N]      timed report of the last N jobs: input -> plan -> command -> motion, start-up marked
 #   run.sh log              follow the job log
 #   run.sh follow           show the running job's log until it ends, then its result
 #   run.sh relocate         find the pose by matching the lidar scan to the whole map and apply it (no motion)
@@ -102,9 +103,10 @@ P
   selfscan) timeout 60 python3 dock.py selfscan --save ;;
   check)    timeout 90 python3 dock.py check "${2:-D}" ;;
   bench)    timeout 120 python3 dock.py bench "${2:-D}" ;;
+  latency)  python3 latency_report.py run.log --jobs "$(num "$2" 5)" ;;
   log)      tail -n 30 -f "$LOG" ;;
   follow)   sleep 0.5; tail -n +$(( $(wc -l < "$LOG") - 2 )) -f "$LOG" & T=$!
             while running; do sleep 0.5; done; sleep 0.5; kill $T 2>/dev/null; echo; bash "$0" job-status ;;
   relocate) timeout 240 python3 locmatch.py global --apply; timeout 60 python3 locmatch.py check | tail -n 1 ;;
-  *)        sed -n 2,35p "$0" ;;
+  *)        sed -n 2,36p "$0" ;;
 esac

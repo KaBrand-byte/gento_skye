@@ -21,7 +21,7 @@ with open(LOG, 'a') as log:
     p = subprocess.Popen(cmd, cwd=HERE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
     for line in p.stdout:
         log.write(line); log.flush()
-        body = re.sub(r'^\[\s*[\d.]+s\]\s*', '', line)      # dock.py log lines carry an elapsed-time prefix
+        body = re.sub(r'^\[[^\]]*\]\s*', '', line)       # dock.py log lines carry a [time elapsed] prefix
         if body.startswith(('FINAL', 'STAGE-ONLY')):
             final = body.strip()
         elif 'ABORT' in line:

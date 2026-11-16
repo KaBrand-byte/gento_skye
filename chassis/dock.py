@@ -70,20 +70,39 @@ MOVES = [0]                    # incremented by every relative move: invalidates
 _CACHE = {'moves': -1, 't': 0.0, 'a': None}
 PLAN_LIMIT_MS = 1200           # requirement: data input -> planning done (command issued) below this
 INPUT_T = [None]               # when the newest sensor input used for planning became available
+CMD_INPUT_T = [None]           # input time of the command being executed (for the motion-start time)
 _FROZEN = [None]               # bench: plan on one fixed snapshot
 LAT_FILE = os.path.join(HERE, 'latency_log.csv')
+# Timing events in the log (parsed by latency_report.py; every line carries the wall-clock time to the ms):
+#   LIDAR scan start | INPUT ready: ... | PLAN start: ... | PLAN done: ... | input -> plan N ms
+#   COMMAND accepted: ... | input -> command N ms | MOTION started: ... | input -> motion N ms
 
 
-def input_ready():
-    INPUT_T[0] = time.time()
+def stamp(t=None):
+    t = time.time() if t is None else t
+    return time.strftime('%H:%M:%S', time.localtime(t)) + '.%03d' % int((t % 1.0) * 1000)
+
+
+def input_ready(what):
+    INPUT_T[0] = time.time(); log('INPUT ready: %s' % what)
+
+
+def plan_start(what):
+    if INPUT_T[0] is not None:
+        log('PLAN start: %s' % what)
+
+
+def _since(t0):
+    return 1000.0 * (time.time() - t0)
 
 
 def plan_done(step):
-    """Log the planning latency of `step`: from the newest sensor input to the command being issued."""
+    """Planning of `step` finished (command about to be issued): log the time since the newest sensor input."""
     if INPUT_T[0] is None:
+        CMD_INPUT_T[0] = None
         return
-    ms = 1000.0 * (time.time() - INPUT_T[0]); INPUT_T[0] = None
-    log('  plan latency %.0f ms (input -> %s)%s' % (ms, step, '  OVER %d ms' % PLAN_LIMIT_MS if ms > PLAN_LIMIT_MS else ''))
+    ms = _since(INPUT_T[0]); CMD_INPUT_T[0] = INPUT_T[0]; INPUT_T[0] = None
+    log('PLAN done: %s | input -> plan %.0f ms%s' % (step, ms, '  OVER %d ms' % PLAN_LIMIT_MS if ms > PLAN_LIMIT_MS else ''))
     try:
         new = not os.path.exists(LAT_FILE)
         with open(LAT_FILE, 'a') as fh:
@@ -95,7 +114,30 @@ def plan_done(step):
 
 
 def log(*a):
-    print('[%6.1fs]' % (time.time() - T0), *a, flush=True)
+    print('[%s %6.1fs]' % (stamp(), time.time() - T0), *a, flush=True)
+
+
+def command_sent(step):
+    if CMD_INPUT_T[0] is not None:
+        log('COMMAND accepted: %s | input -> command %.0f ms' % (step, _since(CMD_INPUT_T[0])))
+
+
+class MotionWatch:
+    """Logs 'MOTION started' once the map pose has moved (> 1 cm or > 0.5 deg) after a command."""
+    def __init__(self, step):
+        self.step = step; self.t_in = CMD_INPUT_T[0]; self.p0 = _POSE[0]; self.done = self.t_in is None
+
+    def poll(self):
+        if self.done or _POSE[0] is None:
+            return
+        if self.p0 is None:
+            self.p0 = _POSE[0]
+            return
+        a, b = self.p0.pose, _POSE[0].pose
+        if (math.hypot(b.position.x - a.position.x, b.position.y - a.position.y) > 0.01
+                or abs((b.orientation.z - a.orientation.z + math.pi) % (2 * math.pi) - math.pi) > math.radians(0.5)):
+            self.done = True
+            log('MOTION started: %s | input -> motion %.0f ms' % (self.step, _since(self.t_in)))
 
 
 def pub(m):
@@ -108,13 +150,14 @@ def cloud(fresh=False):
         return _FROZEN[0]
     if not fresh and _CACHE['moves'] == MOVES[0] and time.time() - _CACHE['t'] < 2.0:
         return _CACHE['a']
-    C.clear(); spin(0.15); C.clear(); t = time.time()
+    log('LIDAR scan start'); C.clear(); spin(0.15); C.clear(); t = time.time()
     while len(C) < FRAMES and time.time() - t < 4:
         rclpy.spin_once(n, timeout_sec=0.05)
     a = np.concatenate([np.stack([s['x'], s['y'], s['z']], 1).astype(float)
                         for s in (pc2.read_points(m, field_names=('x', 'y', 'z'), skip_nans=True) for m in list(C))])
     a = a[np.isfinite(a).all(1)]
-    _CACHE.update(moves=MOVES[0], t=time.time(), a=a); input_ready()
+    _CACHE.update(moves=MOVES[0], t=time.time(), a=a)
+    input_ready('lidar snapshot %d points, %d frames' % (len(a), len(C)))
     return a
 
 
@@ -257,7 +300,10 @@ def rel(x=0.0, yaw=0.0, rear_check=False, y=0.0):
     # Every collision check here assumes straight pure moves: refuse combined goals.
     if abs(x) > 0.001 and abs(y) > 0.001:
         raise SystemExit('ABORT: combined forward + sideways move (x %.3f, y %.3f) refused - split it' % (x, y))
-    plan_done('move x %.3f y %.3f yaw %.1f' % (x, y, math.degrees(yaw)))
+    step = 'move x %.3f y %.3f yaw %.1f' % (x, y, math.degrees(yaw))
+    plan_done(step)
+    if not _POSE_SUB:
+        map_pose()                              # pose subscription for the motion-start time
     if S[0].is_soft_auto:
         setmode(1)
     unpark()
@@ -277,9 +323,10 @@ def rel(x=0.0, yaw=0.0, rear_check=False, y=0.0):
         spin(0.5); unpark(force=True); spin(0.3)
     else:
         raise SystemExit('ABORT: relative move rejected (check parking / soft mode)')
+    command_sent(step); mw = MotionWatch(step)
     rf = gh.get_result_async(); t0 = time.time()
     while not rf.done() and time.time() - t0 < 60:
-        rclpy.spin_once(n, timeout_sec=0.05)
+        rclpy.spin_once(n, timeout_sec=0.05); mw.poll()
         if rear_check and U[0] and min(U[0].get(5, 9), U[0].get(6, 9)) < REAR_MIN:
             log('SAFETY: rear < %.2f m, cancel' % REAR_MIN); cf = gh.cancel_goal_async()
             rclpy.spin_until_future_complete(n, cf, timeout_sec=3); raise SystemExit(1)
@@ -537,6 +584,9 @@ def check_localisation():
                          '(locmatch.py global --apply, or relocate on the web page)' % (res.get('match', 0), LOC_MIN_MATCH))
 
 
+NAV_WATCH = [None]
+
+
 def nav_task(st, pose=None):
     """Submit the vendor navigation task to the station's staging point - or to `pose` [x, y, yaw_deg], e.g. a
     waypoint or a jittered safe point - (in-process, NAV_SPEED)."""
@@ -559,6 +609,7 @@ def nav_task(st, pose=None):
     f = c.call_async(r); rclpy.spin_until_future_complete(n, f, timeout_sec=10); res = f.result()
     if res is None:
         raise SystemExit('ABORT: navigation service did not answer')
+    command_sent('navigation task'); NAV_WATCH[0] = MotionWatch('navigation task (vendor path planning + start)')
     return 'task %d %d %s (speed %.2f m/s)' % (res.task_id, res.error_code, res.error_msg, NAV_SPEED)
 
 
@@ -604,11 +655,11 @@ def settled_pose(timeout=4.0):
         spin(0.4); cur = map_pose()
         if (math.hypot(cur[0] - last[0], cur[1] - last[1]) < 0.003
                 and abs((cur[2] - last[2] + math.pi) % (2 * math.pi) - math.pi) < math.radians(0.2)):
-            input_ready()
+            input_ready('pose settled (%.3f, %.3f, %.1f deg)' % (cur[0], cur[1], math.degrees(cur[2])))
             return cur
         last = cur
     log('  localisation still moving after %.0f s - using the latest pose' % timeout)
-    input_ready()
+    input_ready('pose (still moving) (%.3f, %.3f, %.1f deg)' % (last[0], last[1], math.degrees(last[2])))
     return last
 
 
@@ -884,12 +935,18 @@ def wait_task(tmo=150, near=None, tol=STAGING_TOL):
     stops a few cm off the node ("Current Pos Without Node"); so if we are within `tol` of the staging point
     and have not moved for 1.5 s, treat it as arrived and cancel the dangling task ourselves."""
     import urllib.request
-    t0 = time.time(); spin(0.5); last = None; still = time.time()
+    t0 = time.time(); last = None; still = time.time(); mw = NAV_WATCH[0]; NAV_WATCH[0] = None
+    while time.time() - t0 < 0.5:
+        rclpy.spin_once(n, timeout_sec=0.05)
+        if mw:
+            mw.poll()
     while time.time() - t0 < tmo:
         q = urllib.request.Request('http://127.0.0.1:8080/api/Task/GetAllTask', data=b'{}',
                                    headers={'Content-Type': 'application/json'})
         if not json.load(urllib.request.urlopen(q, timeout=5))['Content']:
             return True
+        if mw:
+            mw.poll()
         if near:
             x, y, yaw = map_pose()
             if last is None or math.hypot(x - last[0], y - last[1]) > 0.005 or abs(yaw - last[2]) > 0.005:
@@ -897,7 +954,10 @@ def wait_task(tmo=150, near=None, tol=STAGING_TOL):
             if math.hypot(x - near[0], y - near[1]) < tol and time.time() - still > 1.5:
                 log('arrived %.3f m from staging but the server keeps the task open: cancelling it' % math.hypot(x - near[0], y - near[1]))
                 cancel_all_tasks(); return True
-        spin(0.5)
+        for _ in range(10):
+            rclpy.spin_once(n, timeout_sec=0.05)
+            if mw:
+                mw.poll()
     return False
 
 
@@ -935,6 +995,23 @@ def cloud_in_pose_frame(pose_deg):
     x, y, h = pose_deg; c, s = math.cos(-math.radians(h)), math.sin(-math.radians(h))
     return np.stack([c * (mx - x) - s * (my - y), s * (mx - x) + c * (my - y), p[:, 2]], 1)
 
+
+def _planner(fn, what):
+    def wrapped(*a, **k):
+        plan_start(what)
+        return fn(*a, **k)
+    wrapped.__name__ = fn.__name__; wrapped.__doc__ = fn.__doc__
+    return wrapped
+
+
+for _fn, _what in (('leave_map_station', 'leave the station (back to its safe point)'),
+                   ('move_to_turn_spot', 'move to a spot where turning is clear'),
+                   ('face_towards', 'turn towards the destination'), ('safe_rotate', 'turn in place'),
+                   ('align_heading', 'heading correction'), ('align_lateral', 'sideways correction'),
+                   ('sideways_small', 'small sideways correction'), ('plan_approach', 'approach plan'),
+                   ('translate', 'straight path'), ('ref_offset', 'reference scan match'),
+                   ('nav_task', 'navigation task to the safe point')):
+    globals()[_fn] = _planner(globals()[_fn], _what)
 
 cmd = sys.argv[1]; args = sys.argv[2:]; dry = '--dry' in args; args = [a for a in args if a != '--dry']
 if '--wide' in args:
