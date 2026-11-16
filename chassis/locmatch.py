@@ -2,17 +2,55 @@
 """locmatch.py [check|search R DEG|global] [--apply]
 Scores the live lidar scan against map_2d.png at the reported pose; optionally searches for a better pose
 and (with --apply) relocates via slam/Relocation (vendor convention: orientation.w = yaw rad)."""
-import os, sys, time, math, json, numpy as np, cv2, rclpy
+import os, re, sys, time, math, json, numpy as np, cv2, rclpy
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import PointCloud2
 from sensor_msgs_py import point_cloud2 as pc2
 from slam.msg import LocationData
 
-D = os.environ.get('GENTO_MAP_DIR', '/home/sunrise/robot/config/map/2/floor1/')   # vendor map in use
+MAP_ROOT = '/home/sunrise/robot/config/map/'
+SERVER_CFG = '/home/sunrise/robot/config/param/robot_server.json'    # {"map_id": N}: the vendor's current map
+LOC_LOG = '/mnt/ssd/log/location.log'                                # "加载地图成功<path>": map the localisation loaded
+
+
+def loaded_map_id():
+    """Map id the vendor localisation last loaded (from the end of its log), or None."""
+    try:
+        with open(LOC_LOG, 'rb') as f:
+            f.seek(0, 2); f.seek(max(0, f.tell() - 4000000))
+            tail = f.read().decode('utf-8', 'ignore')
+        hits = re.findall(r'加载地图成功\S*/config/map/(\d+)/', tail)
+        return int(hits[-1]) if hits else None
+    except OSError:
+        return None
+
+
+def map_dir():
+    """Directory of the map in use: GENTO_MAP_DIR, else the vendor's current map (robot_server.json map_id), else
+    the map the localisation last loaded.  Re-mapping therefore needs no change here."""
+    if os.environ.get('GENTO_MAP_DIR'):
+        return os.environ['GENTO_MAP_DIR'].rstrip('/') + '/', 'GENTO_MAP_DIR'
+    try:
+        mid = int(json.load(open(SERVER_CFG))['map_id'])
+        if os.path.exists(MAP_ROOT + '%d/floor1/map_2d.bmap' % mid):
+            return MAP_ROOT + '%d/floor1/' % mid, 'map_id %d' % mid
+    except (OSError, ValueError, KeyError, TypeError):
+        pass
+    mid = loaded_map_id()
+    if mid is not None and os.path.exists(MAP_ROOT + '%d/floor1/map_2d.bmap' % mid):
+        return MAP_ROOT + '%d/floor1/' % mid, 'map %d (location.log)' % mid
+    raise SystemExit('ABORT: cannot tell which vendor map is in use (%s, %s)' % (SERVER_CFG, LOC_LOG))
+
+
+D, D_SRC = map_dir()
 RES = 0.05
 _b = json.load(open(D + 'map_2d.bmap'))
 _o = np.array([[q['x'], q['y']] for q in _b['normalPosList']])
+_lid = loaded_map_id()
+MAP_NOTE = None
+if D_SRC.startswith('map_id') and _lid is not None and _lid != int(D_SRC.split()[1]):
+    MAP_NOTE = 'vendor current map is %s but the localisation last loaded map %d' % (D_SRC, _lid)
 OX, OY = _o[:, 0].min() - 3.0, _o[:, 1].min() - 3.0
 W = int((_o[:, 0].max() + 3.0 - OX) / RES) + 1; H = int((_o[:, 1].max() + 3.0 - OY) / RES) + 1
 occ = np.zeros((H, W), bool)
@@ -56,7 +94,10 @@ def refine(b):
 
 
 s0 = score(X0, Y0, T0)
-res = dict(reported=[round(X0, 3), round(Y0, 3), round(math.degrees(T0), 1)], conf=L[0].confidence, pts=len(P), match=round(s0, 3))
+res = dict(reported=[round(X0, 3), round(Y0, 3), round(math.degrees(T0), 1)], conf=L[0].confidence, pts=len(P), match=round(s0, 3),
+           map=D_SRC)
+if MAP_NOTE:
+    res['map_warning'] = MAP_NOTE
 mode = sys.argv[1] if len(sys.argv) > 1 else 'check'
 best = (s0, X0, Y0, T0)
 cands = []
@@ -67,7 +108,10 @@ if mode in ('search', 'global'):
         xs = np.arange(X0 - R, X0 + R + 1e-9, 0.1); ys = np.arange(Y0 - R, Y0 + R + 1e-9, 0.1)
         ths = T0 + np.radians(np.arange(-DG, DG + 1e-9, 2.0))
     else:
-        xs = np.arange(-2.8, 5.6, 0.15); ys = np.arange(-6.6, 3.8, 0.15); ths = np.radians(np.arange(-180, 180, 4.0))
+        # the whole mapped area (inside the outermost walls), not a fixed box of one particular map
+        x0, y0 = np.percentile(_o, 1, axis=0); x1, y1 = np.percentile(_o, 99, axis=0)
+        xs = np.arange(x0, x1, 0.15); ys = np.arange(y0, y1, 0.15); ths = np.radians(np.arange(-180, 180, 4.0))
+        res['search_box'] = [round(float(v), 2) for v in (x0, x1, y0, y1)]
     for th in ths:
         for x in xs:
             for y in ys:
