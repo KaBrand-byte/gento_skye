@@ -171,6 +171,17 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertNotIn(("start", "T"), FakeNav.log)                     # nothing moved
 
+    def test_lift_lowers_the_tray_after_the_arms(self):
+        code, report = self.run_trial(extra=["--down-mm", "120"])
+        self.assertEqual(code, 0)
+        plan = report["metadata"]["place_motion_mm"]
+        self.assertEqual((plan["arm_down"], plan["lift_down"], plan["total_down"]), (120, 30, 150))
+        lift = [s for s in report["steps"] if s["name"] == "place_lift_down" and s.get("status") == "started"][0]
+        self.assertEqual(lift["target_mm"], runner.load_config(self.cfg).receive_lift[0] - 30)
+        code, report = self.run_trial(extra=["--down-mm", "120", "--place-lift-mm", "0"])
+        self.assertEqual(report["metadata"]["place_motion_mm"]["lift_down"], 0)
+        self.assertFalse(any(s["name"] == "place_lift_down" for s in report["steps"]))
+
     def test_down_distance_can_be_set_for_one_run(self):
         code, report = self.run_trial(extra=["--down-mm", "120"])
         self.assertEqual(code, 0)
@@ -191,8 +202,9 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(code, 0)
         plan = report["metadata"]["place_motion_mm"]
         self.assertEqual(plan["down"], 150)
-        self.assertEqual(plan["arm_down"] + plan["lift_down"], 150)
-        self.assertGreater(plan["lift_down"], 0)
+        self.assertEqual(plan["lift_down"], max(150 - plan["arm_down"], runner.PLACE_LIFT_MM))
+        self.assertEqual(plan["total_down"], plan["arm_down"] + plan["lift_down"])
+        self.assertEqual(plan["arm_up"], plan["arm_down"])                 # arms back up by what they went down
         names = list(dict.fromkeys(s["name"] for s in report["steps"]))
         i = names.index
         self.assertLess(i("down"), i("place_lift_down"))
