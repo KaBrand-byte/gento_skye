@@ -5,13 +5,16 @@
 #   status     robot state, nav tasks, running job, last log lines        (no motion)
 #   selfscan   measure arms (+ tray) with the lidar, store in the model    (no motion; nothing within ~1 m in front)
 #   check T|D  what docking at T / D would do from the current pose       (no motion)
-#   goto NAME [GAP]       DRIVE: dock at station NAME (T, D, ...)                                  (asks y/n)
+#   goto NAME [GAP] [--via none|random|W] [--jitter R]   DRIVE: dock at station NAME (T, D, ...)  (asks y/n)
+#                         --via: through a taught waypoint, --jitter: random spot within R m of the safe point
 #   lineup NAME           DRIVE: like goto, but stop lined up in front of NAME before driving in  (asks y/n)
 #   undock                DRIVE: reverse straight out along the last docking approach              (asks y/n)
 #   tune NAME KEY VALUE   fine-tune: gap (m) | lat_offset (m, + = further left) | yaw_offset (deg, + = left)
 #   teach-pose NAME [BACK] [left|right]   NO MOTION: robot EXACTLY at the final pose of NAME: record it
 #   teach-staging NAME [map]  NO MOTION: robot at a safe point near NAME (room to turn): its staging point
 #   teach-ref NAME        NO MOTION: robot exactly at map station NAME: record a reference scan
+#   teach-waypoint NAME [clear]  NO MOTION: robot in an open area (room to turn): record route waypoint NAME
+#   waypoints             list waypoints and which ones a random route may use     (no motion)
 #   accept NAME [clear]   NO MOTION: robot lined up in front of NAME: structure verified clear on site
 #   restage NAME          NO MOTION: recompute the staging spot of a taught station from here
 #   relocate   fix the localisation (scan matched to the whole map)                    (no motion)
@@ -20,6 +23,7 @@
 #   log        follow the job log (Ctrl+C to leave; the job keeps running)
 #   task [args]    START THE FULL TASK (arms + navigation) in tmux on the Orin           (asks y/n)
 #                  args e.g. --cycles 10 | --down-mm 120 | --holding | --no-return | --start ''
+#                  --random-route: random waypoint + random spot near the safe points (route variation)
 #   task-attach    show the running task again (Ctrl-b d detaches; the task keeps running)
 #   task-stop      stop the task (arms + chassis) and software-stop the chassis
 #   task-check     no motion: task config + SDK version on the Orin
@@ -57,10 +61,10 @@ quote() { local out=""; for a in "$@"; do out+=" $(printf '%q' "$a")"; done; ech
 
 cmd=${1:-help}; shift || true
 case "$cmd" in
-  status|selfscan|job-status|relocate|stop)  ch "$cmd" ;;
+  status|selfscan|job-status|relocate|stop|waypoints)  ch "$cmd" ;;
   job)        ch job-status ;;
   check)      ch check "${1:-D}" ;;
-  tune|teach-pose|teach-staging|teach-ref|accept|restage)  ch "$cmd$(quote "$@")" ;;
+  tune|teach-pose|teach-staging|teach-ref|teach-waypoint|accept|restage)  ch "$cmd$(quote "$@")" ;;
   goto)       [ -n "$1" ] || { echo "usage: gento goto NAME [GAP]"; exit 1; }
               confirm "dock at station $1"; ch_t "goto$(quote "$@")" ;;
   lineup)     [ -n "$1" ] || { echo "usage: gento lineup NAME"; exit 1; }
@@ -82,5 +86,5 @@ case "$cmd" in
   setup)      [ $ON_ORIN = 1 ] || { echo "run 'gento setup' on the Orin"; exit 1; }
               [ -f ~/.ssh/id_ed25519 ] || ssh-keygen -t ed25519 -N "" -f ~/.ssh/id_ed25519
               ssh-copy-id -o ConnectTimeout=10 sunrise@6.6.7.6 && ssh -o BatchMode=yes sunrise@6.6.7.6 echo "chassis login OK" ;;
-  *)          sed -n '2,33p' "$0" ;;
+  *)          sed -n '2,38p' "$0" ;;
 esac

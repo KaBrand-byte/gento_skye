@@ -168,6 +168,8 @@ Orin（nvidia）  ~/gento_skye                       底盘 S100（sunrise）  ~
   6. `gento goto D` 试 2–3 次，必要时 `gento tune D gap|lat_offset|yaw_offset 值`；
   7. 手臂姿态变化后：在空旷处夹着托盘 `gento selfscan`。
 - **验收前建议**：按第 7 节第 4 条调整厂家避障；安全点选在不会摆障碍物的地方；每次演示前做一次只读全检。
+- **场地改动（2026-11-16）**：放置位置变了、路上加了障碍物，端盘和运输动作也在改（`config/default.json`，由 `skye_task` 维护者修改）。顺序：场地摆定 → （障碍物固定的话）厂家重新建图、`gento relocate`、重设开机热点 → 动作定稿 → 空旷处夹着托盘 `gento selfscan`，按新托盘和放置距离更新 `robot_model.json` 的 `tray` / `place_motion`，必要时调整任务脚本 → 重标 D（`teach-pose`、`teach-staging`、`teach-ref`，需要时 `lineup` + `accept`）和 T（`teach-staging T map`、`teach-ref T`）→ 示教途经点 → `goto` 往返 → `gento task` → `--cycles 10`。旧数据在备份仓库 `robot-data` 分支和底盘的 `.bak-*` 文件中。
+- **路线变化（已写好，未部署、未实车测试）**：`gento task --random-route` 每趟随机经过一个途经点（`teach-waypoint W1` 等，存在底盘 `waypoints.json`）或直达，并在安全点附近 0.08 m 内随机取点；最终停靠不变，随机点不能转身或进场被挡时先回示教的安全点。见 `docs/chassis-navigation.md` 6.3 节；代码在 `chassis/route.py`（离线测试 `chassis/tests/test_route.py`）和 `dock.py`。
 
 ## 9. 安全约定（今天的经验）
 

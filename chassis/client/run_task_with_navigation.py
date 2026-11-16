@@ -35,6 +35,7 @@ import time
 
 ROOT = Path(__file__).resolve().parents[2]
 LINK_RELEASE_S = 2.0
+RANDOM_ROUTE_JITTER = 0.08  # m: --random-route, random spot within this of the taught safe points
 MAX_LIFT_ASSIST_MM = 60.0  # at most this much of the place descent is done by the lift instead of the arms
 ARM_MARGIN_MM = 10.0       # stay this far inside the arms' planning limit (elbow not near straight)     # the controller refuses a new link (-22) for ~1 s after the previous one was closed
 sys.path.insert(0, str(ROOT))
@@ -294,7 +295,12 @@ class Trial:
             config = dataclasses.replace(config, down_mm=down, up_mm=a.up_mm if a.up_mm is not None else down)
             logging.info("本次运行：下降 %s mm，上移 %s mm（配置文件不变）", config.down_mm, config.up_mm)
         gaps = {k: v for k, v in ((a.start, a.start_gap), (a.place, a.place_gap)) if v is not None}
-        self.nav = GentoNavigation(transport=a.transport, ssh_target=a.ssh_target, gaps=gaps)
+        route = {"via": a.via, "jitter": a.jitter}
+        if a.random_route:
+            route = {"via": a.via or "random", "jitter": RANDOM_ROUTE_JITTER if a.jitter is None else a.jitter}
+        if any(route.values()):
+            logging.info("路线变化：途经点 %s，安全点随机偏移 %s m", route["via"] or "无", route["jitter"] or 0)
+        self.nav = GentoNavigation(transport=a.transport, ssh_target=a.ssh_target, gaps=gaps, route=route)
         sdk = GentoSDK(config)
         self.sequence = self.make_sequence(sdk, config)
         result = self.sequence.result
@@ -385,6 +391,10 @@ def main(argv=None):
                    help="托盘已在双爪中（例如中途停止后）：不张爪、跳过起始点和交接，直接去放置点")
     p.add_argument("--no-return", action="store_true", help="放置后不返回起始点")
     p.add_argument("--selfscan", action="store_true", help="准备完成后先测手臂／托盘占位（车前约 1 m 需无物体）")
+    p.add_argument("--random-route", action="store_true",
+                   help="演示用路线变化：随机经过一个示教的途经点 + 在安全点附近随机偏移（最终停靠精度不变）")
+    p.add_argument("--via", help="途经点：none | random | 途经点名（如 W1）")
+    p.add_argument("--jitter", type=float, help="安全点随机偏移半径 m（0–0.20；--random-route 默认 0.08）")
     p.add_argument("--nav-timeout", type=float, default=600.0)
     p.add_argument("--poll", type=float, default=0.5)
     args = p.parse_args(argv)

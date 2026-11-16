@@ -42,6 +42,14 @@ class SshTransportTests(unittest.TestCase):
             self.assertTrue(nav.is_arrived_and_stopped())
         self.assertTrue(calls[0].endswith("run.sh goto D 0.300"))
 
+    def test_route_options_reach_run_sh(self):
+        calls, patch = self.patch_run(["started job D (1): ...\n", "started job T (2): ...\n"])
+        with patch:
+            GentoNavigation(transport="ssh", route={"via": "random", "jitter": 0.08}).start("D")
+            GentoNavigation(transport="ssh", route={"via": None, "jitter": 0}).start("T")
+        self.assertTrue(calls[0].endswith("run.sh goto D --via random --jitter 0.080"), calls[0])
+        self.assertTrue(calls[1].endswith("run.sh goto T"), calls[1])
+
     def test_refused_job_raises(self):
         _, patch = self.patch_run(["BUSY: job 42 still running - use stop first\n"])
         with patch, self.assertRaises(NavigationError):

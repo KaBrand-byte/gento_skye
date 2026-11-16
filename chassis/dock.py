@@ -21,7 +21,13 @@ from move.action import MoveRelative
 HERE = os.path.dirname(os.path.abspath(__file__))      # install dir (stations.json, logs, helpers)
 sys.path.insert(0, HERE)
 import robot_model as RM
+import route as RT
 CFG = RM.load()
+WP_FILE = os.path.join(HERE, RT.WAYPOINT_FILE)
+WAYPOINT_TOL = 0.35     # m: a waypoint only shapes the route - close enough is reached
+WAYPOINT_TMO = 90       # s: not reached by then -> cancel and drive straight to the destination
+VIA = ['none']          # --via none|random|NAME
+JITTER = [0.0]          # --jitter R: navigate to a random spot within R m of the taught safe point
 
 FRONT = 0.338          # chassis centre -> front edge
 GRIP = 0.33            # gripper tip beyond chassis front (worst case)
@@ -502,13 +508,14 @@ def check_localisation():
                          '(locmatch.py global --apply, or relocate on the web page)' % (res.get('match', 0), LOC_MIN_MATCH))
 
 
-def nav_task(st):
-    """Submit the vendor navigation task to the station's staging point (in-process, NAV_SPEED)."""
+def nav_task(st, pose=None):
+    """Submit the vendor navigation task to the station's staging point - or to `pose` [x, y, yaw_deg], e.g. a
+    waypoint or a jittered safe point - (in-process, NAV_SPEED)."""
     _PARK_OK[0] = False                         # navigation ends in parking mode
     from server.srv import CreateTaskById, CreateTaskByPose
     from server.msg import TargetInfoWithId, TargetInfoWithPose
-    if 'staging_pose' in st:
-        sx, sy, sh = st['staging_pose']
+    if pose is not None or 'staging_pose' in st:
+        sx, sy, sh = pose if pose is not None else st['staging_pose']
         t = TargetInfoWithPose(); t.target_pose.position.x = float(sx); t.target_pose.position.y = float(sy)
         t.target_pose.orientation.w = math.radians(sh)              # vendor convention: w = yaw (rad)
         t.action_type = 0; t.action_param = 0.0
@@ -787,6 +794,35 @@ def face_towards(xy, min_deg=15.0):
     rel(0.0, d)
 
 
+def goto_waypoint(name, wp):
+    """Route variation: drive through a taught waypoint on the way.  A waypoint only shapes the route: if the
+    navigation does not get there in time it is cancelled and the trip continues straight to the destination."""
+    pose = wp['pose']
+    log('route: via waypoint %s (%.2f, %.2f)' % (name, pose[0], pose[1]))
+    if RM.rotation_hits(cloud(), CFG):
+        move_to_turn_spot(0.6)
+    face_towards(pose[:2])
+    if not S[0].is_soft_auto:
+        setmode(0)
+    out = nav_task({}, pose); log(out)
+    if ' 0 Succ' not in out:
+        log('route: waypoint task not created - going straight to the destination'); return False
+    if not wait_task(tmo=WAYPOINT_TMO, near=pose[:2], tol=WAYPOINT_TOL):
+        cancel_all_tasks(); spin(1.0)
+        log('route: waypoint %s not reached in %d s - going straight to the destination' % (name, WAYPOINT_TMO))
+        return False
+    spin(0.3); x, y, _ = map_pose()
+    log('route: at waypoint %s (%.2f m off)' % (name, math.hypot(x - pose[0], y - pose[1])))
+    return True
+
+
+def unjitter(st, why):
+    """Back from a jittered spot to the taught safe point (straight translation, checked)."""
+    dx, dy, _ = rel_target(st['staging_pose'])
+    log('jittered safe point: %s - back to the taught safe point (x %.3f, y %.3f)' % (why, dx, dy))
+    translate(dx, dy)
+
+
 def cancel_all_tasks():
     from server.srv import CancelAllTask
     c = n.create_client(CancelAllTask, 'server/CancelAllTask')
@@ -856,6 +892,11 @@ if '--wide' in args:
     YLIM[0] = 2.5; args.remove('--wide')
 if '--z' in args:
     i = args.index('--z'); ZB[0], ZB[1] = float(args[i + 1]), float(args[i + 2]); args = args[:i] + args[i + 3:]
+if '--via' in args:
+    i = args.index('--via'); VIA[0] = args[i + 1]; args = args[:i] + args[i + 2:]
+if '--jitter' in args:
+    i = args.index('--jitter'); JITTER[0] = float(args[i + 1]); args = args[:i] + args[i + 2:]
+    assert 0.0 <= JITTER[0] <= 0.20, '--jitter must be 0-0.20 m'
 args = [a for a in args if not a.startswith('--')]          # flags (--leave, --stage-only, --save) are read from sys.argv
 spin(1.0)
 if cmd == 'measure':
@@ -966,6 +1007,39 @@ elif cmd == 'teach-staging':
     json.dump(st, open(ST_FILE, 'w'), indent=1)
     log('safe point of %s: (%.3f, %.3f); the station is %.2f m away; mode %s' % (name, x, y, math.hypot(dx, dy), s0.get('mode', 'face')))
     log('taught', name, json.dumps(s0))
+elif cmd == 'teach-waypoint':
+    # teach-waypoint NAME [clear] : NO MOTION.  The robot (arms in the carry pose, holding the tray) stands in an
+    # open area that the route may pass through: record the map pose as waypoint NAME (waypoints.json; the
+    # stations are not touched).  "clear" removes it.  Used by goto with --via random|NAME.
+    name = args[0]; w = RT.load_waypoints(WP_FILE)
+    if name in load_st():
+        raise SystemExit('ABORT: %s is a station name - use another name for a waypoint (e.g. W1)' % name)
+    if 'clear' in args[1:]:
+        w.pop(name, None); RT.save_waypoints(WP_FILE, w); log('waypoint', name, 'removed; left:', ', '.join(sorted(w)) or 'none')
+        raise SystemExit(0)
+    check_localisation()
+    h = RM.rotation_hits(cloud(fresh=True), CFG)
+    if h:
+        raise SystemExit('ABORT: the arms cannot turn in place here: %s - a waypoint needs room to turn' % json.dumps(h))
+    x, y, yaw = map_pose()
+    w[name] = dict(pose=[round(x, 3), round(y, 3), round(math.degrees(yaw), 2)], taught=time.strftime('%Y-%m-%d %H:%M:%S'))
+    RT.save_waypoints(WP_FILE, w)
+    for nm, s0 in load_st().items():
+        if 'staging_pose' in s0:
+            log('  %.2f m from the safe point of %s' % (math.hypot(x - s0['staging_pose'][0], y - s0['staging_pose'][1]), nm))
+    log('taught waypoint', name, json.dumps(w[name]), '| all:', ', '.join(sorted(w)))
+elif cmd == 'waypoints':
+    # waypoints : NO MOTION.  List the waypoints and which of them a random route between the stations may use
+    w = RT.load_waypoints(WP_FILE); st = load_st()
+    for k, v in sorted(w.items()):
+        log('%-6s %s  (taught %s)' % (k, v['pose'], v.get('taught', '?')))
+    sp = {k: s['staging_pose'] for k, s in st.items() if 'staging_pose' in s}
+    for a in sorted(sp):
+        for b in sorted(sp):
+            if a != b:
+                log('%s -> %s: --via random may use %s' % (a, b, ', '.join(RT.eligible(sp[a], sp[b], w)) or 'none (always direct)'))
+    if not w:
+        log('no waypoints taught (teach-waypoint NAME)')
 elif cmd == 'accept':
     # accept NAME [clear] : NO MOTION.  The robot is lined up on station NAME's approach line (e.g. where a goto
     # stopped before driving in) or stands at its final pose.  Records the lidar points that the (conservative)
@@ -1045,6 +1119,7 @@ elif cmd in ('dock', 'redock'):
     # dock NAME [GAP]: navigate to staging (unless redock), align heading, lateral, heading, straight in
     name = args[0]; st = load_st()[name]; gap = float(args[1]) if len(args) > 1 else st['gap']; YLIM[0] = 2.5
     ZB[0], ZB[1] = st['z']
+    jittered = False                            # navigated to a random spot near the safe point (--jitter)
     # fine-tune: lat_offset (m, + = robot further left) shifts the lateral target; yaw_offset (deg, + = left)
     st['end_y'] = st.get('end_y', 0.0) - float(st.get('lat_offset', 0.0)); YAW_OFF[0] = math.radians(float(st.get('yaw_offset', 0.0)))
     if st.get('no_staging') and cmd == 'dock':
@@ -1083,16 +1158,35 @@ elif cmd in ('dock', 'redock'):
                 need_clear(RM.rotation_hits(cloud(), CFG), 'turning at the start position (navigation turns in place '
                            'first; use --leave to move out first)')
             move_to_turn_spot(0.6)
-        dest = st['staging_pose'][:2] if 'staging_pose' in st else st.get('staging_xy')
+        target = st.get('staging_pose')
+        if target and JITTER[0] > 0:
+            # route variation 2: a random spot near the taught safe point (checked again on arrival)
+            target = RT.jitter_pose(st['staging_pose'], st, JITTER[0], front=FRONT, max_fwd=MAX_FWD,
+                                    lat_max=LAT_PLAN_MAX - 0.1, map_max=MAP_MAX_MOVE)
+            jittered = target != list(st['staging_pose'])
+            log('route: safe point %s (%.3f, %.3f), %.2f m from the taught one'
+                % ('jittered to' if jittered else 'kept at', target[0], target[1],
+                   math.hypot(target[0] - st['staging_pose'][0], target[1] - st['staging_pose'][1])))
+        if target and VIA[0] != 'none':
+            # route variation 1: through a taught waypoint (random or named)
+            x0, y0, _ = map_pose(); wps = RT.load_waypoints(WP_FILE)
+            try:
+                wn, why = RT.choose_via((x0, y0), target[:2], wps, VIA[0])
+            except ValueError as e:
+                raise SystemExit('ABORT: %s' % e)
+            log('route:', why if wn is None else 'via %s (%s)' % (wn, why))
+            if wn:
+                goto_waypoint(wn, wps[wn])
+        dest = target[:2] if target else st.get('staging_xy')
         if dest:
             face_towards(dest)                  # our checked turn instead of the vendor's start turn
         if not S[0].is_soft_auto:
             setmode(0)
-        out = nav_task(st)                                      # in-process service call (no extra process)
+        out = nav_task(st, target)                              # in-process service call (no extra process)
         log(out)
         if ' 0 Succ' not in out:
             raise SystemExit('ABORT: task not created')
-        sxy = st['staging_pose'][:2] if 'staging_pose' in st else st.get('staging_xy')
+        sxy = dest
         if not wait_task(near=sxy):
             raise SystemExit('ABORT: staging not reached in time')
         spin(0.3)
@@ -1101,8 +1195,17 @@ elif cmd in ('dock', 'redock'):
             x, y, _ = map_pose(); dd = math.hypot(x - sxy[0], y - sxy[1])
             if dd > STAGING_TOL + 0.05:
                 raise SystemExit('ABORT: navigation ended %.2f m from the staging point (task cancelled or failed?)' % dd)
+        if jittered and RM.rotation_hits(cloud(fresh=True), CFG):
+            unjitter(st, 'turning is not clear here'); jittered = False
         if st.get('mode') == 'map':
-            map_approach(name, st, dry)
+            try:
+                map_approach(name, st, dry)
+            except SystemExit as e:
+                # translate() checks before moving: from the jittered spot the straight path may be blocked
+                if not (jittered and 'no clear straight path' in str(e)):
+                    raise
+                unjitter(st, 'no clear straight path from here'); jittered = False
+                map_approach(name, st, dry)
             setmode(0)
             raise SystemExit(0)
         if 'staging_pose' in st:   # pose tasks keep the start heading: turn to the face here (staging is clear all round)
@@ -1112,7 +1215,19 @@ elif cmd in ('dock', 'redock'):
         raise SystemExit('ABORT: no face found ahead')
     log('staging measure', pub(m))
     m = align_heading(m, dry)
-    if '--stage-only' in sys.argv:                             # e.g. place pose not taught yet: stop at staging
+    if jittered and '--lineup' not in sys.argv:
+        # from the jittered spot the approach may be blocked where it is clear from the taught one: check
+        # (no motion) and fall back to the taught safe point instead of stopping
+        try:
+            plan_approach(m, st, gap)
+        except SystemExit as e:
+            unjitter(st, str(e).replace('ABORT: ', '')); jittered = False
+            turn_to(math.radians(st.get('pose', st['staging_pose'])[2]))
+            m = measure() or measure(near=True)
+            if not m:
+                raise SystemExit('ABORT: no face found ahead')
+            m = align_heading(m, dry)
+    if '--stage-only' in sys.argv:                            # e.g. place pose not taught yet: stop at staging
         log('STAGE-ONLY: stopped at staging, facing the face', pub(m))
         if not dry:
             setmode(0)

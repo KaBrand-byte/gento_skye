@@ -7,7 +7,8 @@
 #   to-start [GAP]  DRIVE to the table T: T1 -> align -> straight in to GAP m (default 0.45)   (MOVES, asks y/n)
 #   demo [GAP]      DRIVE: out of the table -> D1 -> straight towards the conveyor to GAP m (default 0.25),
 #                   stops earlier if robot/arms/tray would touch something            (MOVES, asks y/n)
-#   goto NAME [GAP]       DRIVE: dock at station NAME (T, D, ...)                            (MOVES, asks y/n)
+#   goto NAME [GAP] [--via none|random|W] [--jitter R]   DRIVE: dock at station NAME (T, D, ...);    (MOVES, asks y/n)
+#                         --via: through a taught waypoint, --jitter: random spot within R m of the safe point
 #   tune NAME KEY VALUE   fine-tune: gap (m) | lat_offset (m, + = further left) | yaw_offset (deg, + = left)
 #   teach NAME            record the current lateral position as station NAME (turns a little, asks y/n)
 #   teach-pose NAME [BACK] [left|right]   NO MOTION: robot stands EXACTLY at the final pose of NAME (driven
@@ -16,6 +17,8 @@
 #   teach-staging NAME [map]  NO MOTION: robot at a safe point near NAME (room to turn): record it as NAME's
 #                         staging point; map = dock NAME by map position (turn there, translate straight in)
 #   teach-ref NAME        NO MOTION: robot exactly at map station NAME: record a reference scan (~1 cm docking)
+#   teach-waypoint NAME [clear]  NO MOTION: robot in an open area (room to turn): record route waypoint NAME
+#   waypoints             list waypoints and which ones a random route may use       (no motion)
 #   accept NAME [clear]   NO MOTION: robot lined up in front of NAME: structure the model touches there was
 #                         verified clear on site -> docking ignores exactly those points
 #   restage NAME          NO MOTION: recompute the staging spot of a taught station from here (robot near it)
@@ -26,6 +29,7 @@
 #                  T -> Enter -> D -> place -> reverse out -> arms to carry pose -> back to T
 #                  args e.g. --cycles 10 (10 runs in a row, stops at a failure) | --down-mm 120 | --no-return
 #                  --holding: tray still in the grippers after a stop: no opening, straight to D, place, back
+#                  --random-route: random waypoint + random spot near the safe points (demo route variation)
 #   task-attach    re-attach to the running task (after a Wi-Fi drop); Ctrl-b d detaches, task keeps running
 #   task-stop      Ctrl-C to the task (stops arms + chassis) and software-stop the chassis
 #   task-check     no motion: task config + SDK version on the Orin
@@ -62,6 +66,8 @@ switch ($Cmd) {
     'teach-staging' { ssh chassis "$remote teach-staging $Arg $($Rest -join ' ')" }
     'teach-ref' { ssh chassis "$remote teach-ref $Arg" }
     'accept'   { ssh chassis "$remote accept $Arg $($Rest -join ' ')" }
+    'teach-waypoint' { ssh chassis "$remote teach-waypoint $Arg $($Rest -join ' ')" }
+    'waypoints' { ssh chassis "$remote waypoints" }
     'restage'  { ssh chassis "$remote restage $Arg $($Rest -join ' ')" }
     'lineup'   { Confirm-Motion "line up in front of station $Arg (not driving in)"; ssh -t chassis "$remote lineup $Arg && $remote follow" }
     'undock'   { Confirm-Motion "reverse straight out of the last docking"; ssh -t chassis "$remote undock && $remote follow" }

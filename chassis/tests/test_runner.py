@@ -27,7 +27,7 @@ class FakeNav:
 
     def __init__(self, fail_on=None, **kwargs):
         self.fail_on, self.active, self.count = fail_on, None, 0
-        FakeNav.log.append(("init", kwargs.get("gaps")))
+        FakeNav.log.append(("init", kwargs.get("gaps"))); FakeNav.route = kwargs.get("route")
 
     def start(self, destination):
         FakeNav.log.append(("start", destination)); self.active, self.count = destination, 0
@@ -226,6 +226,17 @@ class RunnerTests(unittest.TestCase):
         code, report = self.run_trial(extra=["--holding"])                  # arms at ready
         self.assertEqual(code, 1)
         self.assertNotIn(("start", "D"), FakeNav.log)
+
+    def test_route_is_fixed_unless_asked(self):
+        self.run_trial()
+        self.assertFalse(any(FakeNav.route.values()))
+
+    def test_random_route_asks_for_a_random_waypoint_and_jitter(self):
+        code, _ = self.run_trial(extra=["--random-route"])
+        self.assertEqual(code, 0)
+        self.assertEqual(FakeNav.route, {"via": "random", "jitter": runner.RANDOM_ROUTE_JITTER})
+        self.run_trial(extra=["--random-route", "--via", "W2", "--jitter", "0"])
+        self.assertEqual(FakeNav.route, {"via": "W2", "jitter": 0.0})
 
     def test_no_return(self):
         code, report = self.run_trial(extra=["--no-return"])

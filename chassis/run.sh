@@ -4,7 +4,9 @@
 #   run.sh demo [GAP]       from the table: move out, D1, face the conveyor, straight in towards GAP m
 #                           (default 0.25) from the current lateral position; stops early where the
 #                           robot/arms/tray would touch something                                       (MOVES)
-#   run.sh goto NAME [GAP]  dock at station NAME of stations.json (used by the skye_task adapter)     (MOVES)
+#   run.sh goto NAME [GAP] [--via none|random|W] [--jitter R]  dock at station NAME of stations.json (used by
+#                           the skye_task adapter); --via: through a waypoint, --jitter: random spot within R m
+#                           of the safe point (route variation for demos)                              (MOVES)
 #   run.sh demo-dry [GAP]   same checks as demo, no motion
 #   run.sh stop             software stop (kill job, cancel moves/tasks, soft manual)
 #   run.sh status           state, tasks, running job, last log lines
@@ -18,6 +20,8 @@
 #   run.sh teach-staging NAME [map]  NO MOTION: robot at a safe point (room to turn) near NAME: record it as NAME's
 #                           staging point; "map": dock NAME by map position (turn here, translate straight to it)
 #   run.sh teach-ref NAME   NO MOTION: robot EXACTLY at map station NAME: record a reference scan (docking ends on it)
+#   run.sh teach-waypoint NAME [clear]  NO MOTION: robot in an open area (room to turn): record a route waypoint
+#   run.sh waypoints        list the waypoints and which ones a random route between the stations may use
 #   run.sh accept NAME [clear]  NO MOTION: robot lined up on NAME's approach line (>= 0.25 m before it): record what the model
 #                           touches there as verified-clear (on site); docking ignores exactly those points
 #   run.sh restage NAME [BACK]  NO MOTION: recompute the staging spot of a taught station from the current scan
@@ -44,10 +48,22 @@ start() {                                   # start JOB CMD...: detached, status
 case "$1" in
   to-start) start T timeout 400 python3 dock.py dock T $(num "$2" 0.45) --leave --closest ;;
   demo)     start D timeout 500 python3 dock.py dock D $(num "$2" 0.25) --leave --here --closest ;;
-  goto)     [ -z "$2" ] && { echo "usage: goto NAME [GAP]"; exit 1; }
-            extra=$(python3 -c "import json,sys;s=json.load(open('stations.json')).get(sys.argv[1]);print('' if s is None else ('--here --closest' if s.get('untaught') else '--closest'))" "$2")
-            [ -z "$extra" ] && { echo "unknown station $2"; exit 1; }
-            start "$2" timeout 500 python3 dock.py dock "$2" $(num "$3" '') --leave $extra ;;
+  goto)     [ -z "$2" ] && { echo "usage: goto NAME [GAP] [--via none|random|W] [--jitter R]"; exit 1; }
+            name=$2; shift 2; g=''
+            if [ -n "$1" ] && [ -n "$(num "$1" '')" ]; then g=$1; shift; fi
+            route=()
+            while [ -n "$1" ]; do
+              case "$1" in
+                --via|--jitter) [ -n "$2" ] || { echo "$1 needs a value"; exit 1; }; route+=("$1" "$2"); shift 2 ;;
+                *) echo "unknown option $1 (goto NAME [GAP] [--via none|random|W] [--jitter R])"; exit 1 ;;
+              esac
+            done
+            extra=$(python3 -c "import json,sys;s=json.load(open('stations.json')).get(sys.argv[1]);print('' if s is None else ('--here --closest' if s.get('untaught') else '--closest'))" "$name")
+            [ -z "$extra" ] && { echo "unknown station $name"; exit 1; }
+            start "$name" timeout 650 python3 dock.py dock "$name" $g --leave $extra "${route[@]}" ;;
+  teach-waypoint) [ -z "$2" ] && { echo "usage: teach-waypoint NAME [clear]"; exit 1; }
+            timeout 90 python3 dock.py teach-waypoint "$2" ${3:+"$3"} ;;
+  waypoints) timeout 30 python3 dock.py waypoints ;;
   teach-staging) [ -z "$2" ] && { echo "usage: teach-staging NAME [map]"; exit 1; }
             timeout 90 python3 dock.py teach-staging "$2" ${3:+"$3"} ;;
   teach-ref) [ -z "$2" ] && { echo "usage: teach-ref NAME"; exit 1; }
@@ -88,5 +104,5 @@ P
   follow)   sleep 0.5; tail -n +$(( $(wc -l < "$LOG") - 2 )) -f "$LOG" & T=$!
             while running; do sleep 0.5; done; sleep 0.5; kill $T 2>/dev/null; echo; bash "$0" job-status ;;
   relocate) timeout 240 python3 locmatch.py global --apply; timeout 60 python3 locmatch.py check | tail -n 1 ;;
-  *)        sed -n 2,30p "$0" ;;
+  *)        sed -n 2,34p "$0" ;;
 esac

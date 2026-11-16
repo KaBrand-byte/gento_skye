@@ -29,12 +29,14 @@ class NavigationError(RuntimeError):
 
 class GentoNavigation:
     def __init__(self, *, transport="ros", ssh_target="chassis", gaps=None, node=None,
-                 ack_timeout=10.0, status_timeout=3.0, run_sh="bash ~/gento_dock/run.sh"):
+                 ack_timeout=10.0, status_timeout=3.0, run_sh="bash ~/gento_dock/run.sh", route=None):
         if transport not in ("ros", "ssh"):
             raise ValueError("transport 必须是 ros 或 ssh")
         self.transport = transport
         self.ssh_target = ssh_target
         self.gaps = dict(gaps or {})
+        # route variation for demos, e.g. {"via": "random", "jitter": 0.08} (see chassis/route.py); empty = fixed
+        self.route = {k: v for k, v in dict(route or {}).items() if k in ("via", "jitter") and v}
         self.ack_timeout = ack_timeout
         self.status_timeout = status_timeout
         self.run_sh = run_sh
@@ -143,11 +145,16 @@ class GentoNavigation:
         """Submit a navigation + docking job; the return is not an arrival indication."""
         gap = self.gaps.get(destination)
         if self.transport == "ros":
-            ack = self._ros_command(cmd="goto", station=destination, gap=gap)
+            ack = self._ros_command(cmd="goto", station=destination, gap=gap, **self.route)
             if not ack.get("ok"):
                 raise NavigationError(f"底盘拒绝导航任务: {ack.get('out')}")
         else:
-            out = self._ssh("goto", destination, *(["%.3f" % gap] if gap is not None else []))
+            extra = []
+            if self.route.get("via"):
+                extra += ["--via", str(self.route["via"])]
+            if self.route.get("jitter"):
+                extra += ["--jitter", "%.3f" % float(self.route["jitter"])]
+            out = self._ssh("goto", destination, *(["%.3f" % gap] if gap is not None else []), *extra)
             if "started job" not in out:
                 raise NavigationError(f"底盘拒绝导航任务: {out.strip()}")
         self.active = destination

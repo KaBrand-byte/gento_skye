@@ -3,7 +3,8 @@
 system with STANDARD messages only (no vendor message packages needed on the client side).
 
   /gento_dock/cmd     std_msgs/String  JSON {"id": "...", "cmd": "goto", "station": "T", "gap": 0.30}
-                                       cmds: goto (station, gap optional) | stop | tune (station, key, value)
+                                       cmds: goto (station; gap, via, jitter optional) | undock | stop |
+                                             tune (station, key, value) | selfscan | check (station)
   /gento_dock/status  std_msgs/String  JSON, 2 Hz, transient-local (late joiners get the last one):
                       {"job": {...job_status.json...}, "ack": {"id", "ok", "out"}, "pose": [x, y, yaw_deg], "t": ...}
 
@@ -52,6 +53,10 @@ class Bridge(Node):
         cid = c.get('id', '')
         if c.get('cmd') == 'goto':
             args = ['goto', str(c['station'])] + ([('%.3f' % float(c['gap']))] if c.get('gap') is not None else [])
+            if c.get('via'):                        # route variation: none | random | waypoint name
+                args += ['--via', str(c['via'])]
+            if c.get('jitter'):                     # m: random spot near the safe point
+                args += ['--jitter', '%.3f' % float(c['jitter'])]
         elif c.get('cmd') == 'undock':              # reverse straight out along the last docking approach
             args = ['undock']
         elif c.get('cmd') == 'stop':
