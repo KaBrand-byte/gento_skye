@@ -20,7 +20,7 @@
 #   run.sh teach-staging NAME [map]  NO MOTION: robot at a safe point (room to turn) near NAME: record it as NAME's
 #                           staging point; "map": dock NAME by map position (turn here, translate straight to it)
 #   run.sh teach-ref NAME   NO MOTION: robot EXACTLY at map station NAME: record a reference scan (docking ends on it)
-#   run.sh teach-waypoint NAME [clear]  NO MOTION: robot in an open area (room to turn): record a route waypoint
+#   run.sh teach-waypoint NAME [clear|force]  NO MOTION: robot in an open area (room to turn): route waypoint
 #   run.sh waypoints        list the waypoints and which ones a random route between the stations may use
 #   run.sh accept NAME [clear]  NO MOTION: robot lined up on NAME's approach line (>= 0.25 m before it): record what the model
 #                           touches there as verified-clear (on site); docking ignores exactly those points

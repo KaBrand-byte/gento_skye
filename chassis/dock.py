@@ -1266,10 +1266,17 @@ elif cmd == 'teach-waypoint':
         raise SystemExit(0)
     check_localisation()
     h = RM.rotation_hits(cloud(fresh=True), CFG)
+    if h and 'force' not in args[1:]:
+        raise SystemExit('ABORT: the arms cannot turn in place here: %s - a waypoint needs room to turn '
+                         '(verified clear on site: teach-waypoint %s force)' % (json.dumps(h), name))
     if h:
-        raise SystemExit('ABORT: the arms cannot turn in place here: %s - a waypoint needs room to turn' % json.dumps(h))
+        log('WARNING: the model says turning here would touch %s - recorded anyway (force: verified on site); '
+            'leaving the waypoint, the robot only turns itself where that is clear, otherwise the vendor navigation '
+            'turns' % json.dumps(h))
     x, y, yaw = map_pose()
     w[name] = dict(pose=[round(x, 3), round(y, 3), round(math.degrees(yaw), 2)], taught=time.strftime('%Y-%m-%d %H:%M:%S'))
+    if h:
+        w[name]['forced'] = True
     RT.save_waypoints(WP_FILE, w)
     for nm, s0 in load_st().items():
         if 'staging_pose' in s0:
