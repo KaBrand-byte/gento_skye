@@ -3,6 +3,7 @@
 #   status     robot state, nav tasks, running job, last log lines        (no motion)
 #   selfscan   measure arms + tray with the lidar, store in the model      (no motion; nothing within ~1 m in front)
 #   check T|D  what docking at T / D would do from the current pose       (no motion)
+#   bench T|D  planning time of each docking step on one lidar snapshot    (no motion; limit 1.2 s)
 #   demo-dry [GAP]  all checks of the demo run, no motion
 #   to-start [GAP]  DRIVE to the table T: T1 -> align -> straight in to GAP m (default 0.45)   (MOVES, asks y/n)
 #   demo [GAP]      DRIVE: out of the table -> D1 -> straight towards the conveyor to GAP m (default 0.25),
@@ -57,6 +58,7 @@ switch ($Cmd) {
     'status'   { ssh chassis "$remote status" }
     'selfscan' { ssh chassis "$remote selfscan" }
     'check'    { if (-not $Arg) { $Arg = 'D' }; ssh chassis "$remote check $Arg" }
+    'bench'    { if (-not $Arg) { $Arg = 'D' }; ssh chassis "$remote bench $Arg" }
     'demo-dry' { ssh chassis "$remote demo-dry $Arg" }
     'to-start' { Confirm-Motion "drive to the table (start point T), gap $(if ($Arg) {$Arg} else {'0.45'}) m"; ssh -t chassis "$remote to-start $Arg && $remote follow" }
     'demo'     { Confirm-Motion "table -> D1 -> straight towards the conveyor, gap $(if ($Arg) {$Arg} else {'0.25'}) m (stops earlier if blocked)"; ssh -t chassis "$remote demo $Arg && $remote follow" }

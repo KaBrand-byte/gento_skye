@@ -123,10 +123,17 @@ def _report(p, sel, what):
                 z=round(float(hits[i, 2]), 3))
 
 
+def _reach(cfg, phase, m):
+    """Radius around the robot centre that any box (+ margin m) reaches: nothing farther can be hit by a turn."""
+    return max(math.hypot(abs(x) + m, abs(y) + m) for _, bx in boxes(cfg, phase) for x in (bx[0], bx[1]) for y in (bx[2], bx[3]))
+
+
 def turn_hits(p, cfg, yaw, phase='carry', step_deg=0.5):
     """Turning in place by `yaw` rad only (e.g. a 1-degree alignment): checks the arc actually swept,
     sampled every step_deg, instead of the full circle used by rotation_hits."""
-    m = cfg['margin']; p = remove_self(p, cfg, phase); hit = np.zeros(len(p), bool)
+    m = cfg['margin']; p = remove_self(p, cfg, phase)
+    p = p[np.hypot(p[:, 0], p[:, 1]) <= _reach(cfg, phase, m) + 0.01]     # only these can be swept at all
+    hit = np.zeros(len(p), bool)
     k = max(1, int(math.ceil(abs(math.degrees(yaw)) / step_deg)))
     for i in range(k + 1):
         a = -yaw * i / k                       # robot turns by +a  ->  the world turns by -a in the robot frame
@@ -174,7 +181,12 @@ def _swept(b, dx, dy):
 def sweep_hits(p, cfg, dx, dy=0.0, phase='carry'):
     """Straight move by (dx, dy) without turning.  Pure forward/back or sideways moves are checked exactly in
     one pass (the swept volume of a box is a longer box); diagonal moves are sampled every 2 cm."""
-    m = cfg.get('margin_straight', 0.03); p = remove_self(p, cfg, phase); hit = np.zeros(len(p), bool)
+    m = cfg.get('margin_straight', 0.03); p = remove_self(p, cfg, phase)
+    bb = np.array([b for _, b in boxes(cfg, phase)])            # only points inside the swept bounding box matter
+    lo = np.array([bb[:, 0].min() + min(dx, 0.0), bb[:, 2].min() + min(dy, 0.0), bb[:, 4].min()]) - m - 0.01
+    hi = np.array([bb[:, 1].max() + max(dx, 0.0), bb[:, 3].max() + max(dy, 0.0), bb[:, 5].max()]) + m + 0.01
+    p = p[((p >= lo) & (p <= hi)).all(1)]
+    hit = np.zeros(len(p), bool)
     if abs(dx) < 1e-9 or abs(dy) < 1e-9:
         for _, b in boxes(cfg, phase):
             hit |= _inside(p, _swept(b, dx, dy), m)

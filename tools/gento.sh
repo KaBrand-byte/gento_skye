@@ -5,6 +5,7 @@
 #   status     robot state, nav tasks, running job, last log lines        (no motion)
 #   selfscan   measure arms (+ tray) with the lidar, store in the model    (no motion; nothing within ~1 m in front)
 #   check T|D  what docking at T / D would do from the current pose       (no motion)
+#   bench T|D  planning time of each docking step on one lidar snapshot    (no motion; limit 1.2 s)
 #   goto NAME [GAP] [--via none|random|W] [--jitter R]   DRIVE: dock at station NAME (T, D, ...)  (asks y/n)
 #                         --via: through a taught waypoint, --jitter: random spot within R m of the safe point
 #   lineup NAME           DRIVE: like goto, but stop lined up in front of NAME before driving in  (asks y/n)
@@ -64,6 +65,7 @@ case "$cmd" in
   status|selfscan|job-status|relocate|stop|waypoints)  ch "$cmd" ;;
   job)        ch job-status ;;
   check)      ch check "${1:-D}" ;;
+  bench)      ch bench "${1:-D}" ;;
   tune|teach-pose|teach-staging|teach-ref|teach-waypoint|accept|restage)  ch "$cmd$(quote "$@")" ;;
   goto)       [ -n "$1" ] || { echo "usage: gento goto NAME [GAP]"; exit 1; }
               confirm "dock at station $1"; ch_t "goto$(quote "$@")" ;;
@@ -86,5 +88,5 @@ case "$cmd" in
   setup)      [ $ON_ORIN = 1 ] || { echo "run 'gento setup' on the Orin"; exit 1; }
               [ -f ~/.ssh/id_ed25519 ] || ssh-keygen -t ed25519 -N "" -f ~/.ssh/id_ed25519
               ssh-copy-id -o ConnectTimeout=10 sunrise@6.6.7.6 && ssh -o BatchMode=yes sunrise@6.6.7.6 echo "chassis login OK" ;;
-  *)          sed -n '2,38p' "$0" ;;
+  *)          sed -n '2,39p' "$0" ;;
 esac

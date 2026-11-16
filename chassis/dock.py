@@ -68,6 +68,30 @@ FRAMES = 6                     # lidar frames per snapshot (10 Hz)
 NAV_SPEED = float(os.environ.get('GENTO_NAV_SPEED', '0.35'))   # vendor max_speed.linear is 0.35 m/s
 MOVES = [0]                    # incremented by every relative move: invalidates the cloud cache
 _CACHE = {'moves': -1, 't': 0.0, 'a': None}
+PLAN_LIMIT_MS = 1200           # requirement: data input -> planning done (command issued) below this
+INPUT_T = [None]               # when the newest sensor input used for planning became available
+_FROZEN = [None]               # bench: plan on one fixed snapshot
+LAT_FILE = os.path.join(HERE, 'latency_log.csv')
+
+
+def input_ready():
+    INPUT_T[0] = time.time()
+
+
+def plan_done(step):
+    """Log the planning latency of `step`: from the newest sensor input to the command being issued."""
+    if INPUT_T[0] is None:
+        return
+    ms = 1000.0 * (time.time() - INPUT_T[0]); INPUT_T[0] = None
+    log('  plan latency %.0f ms (input -> %s)%s' % (ms, step, '  OVER %d ms' % PLAN_LIMIT_MS if ms > PLAN_LIMIT_MS else ''))
+    try:
+        new = not os.path.exists(LAT_FILE)
+        with open(LAT_FILE, 'a') as fh:
+            if new:
+                fh.write('time,step,ms' + chr(10))
+            fh.write('%s,%s,%.0f' % (time.strftime('%m-%d %H:%M:%S'), step.replace(',', ' '), ms) + chr(10))
+    except OSError:
+        pass
 
 
 def log(*a):
@@ -80,6 +104,8 @@ def pub(m):
 
 def cloud(fresh=False):
     """Lidar snapshot (base_link).  Reused while the robot has not moved since and it is < 2 s old."""
+    if _FROZEN[0] is not None:
+        return _FROZEN[0]
     if not fresh and _CACHE['moves'] == MOVES[0] and time.time() - _CACHE['t'] < 2.0:
         return _CACHE['a']
     C.clear(); spin(0.15); C.clear(); t = time.time()
@@ -88,7 +114,7 @@ def cloud(fresh=False):
     a = np.concatenate([np.stack([s['x'], s['y'], s['z']], 1).astype(float)
                         for s in (pc2.read_points(m, field_names=('x', 'y', 'z'), skip_nans=True) for m in list(C))])
     a = a[np.isfinite(a).all(1)]
-    _CACHE.update(moves=MOVES[0], t=time.time(), a=a)
+    _CACHE.update(moves=MOVES[0], t=time.time(), a=a); input_ready()
     return a
 
 
@@ -231,6 +257,7 @@ def rel(x=0.0, yaw=0.0, rear_check=False, y=0.0):
     # Every collision check here assumes straight pure moves: refuse combined goals.
     if abs(x) > 0.001 and abs(y) > 0.001:
         raise SystemExit('ABORT: combined forward + sideways move (x %.3f, y %.3f) refused - split it' % (x, y))
+    plan_done('move x %.3f y %.3f yaw %.1f' % (x, y, math.degrees(yaw)))
     if S[0].is_soft_auto:
         setmode(1)
     unpark()
@@ -526,6 +553,7 @@ def nav_task(st, pose=None):
         t = TargetInfoWithId(); t.target_id = int(st['staging']); t.action_type = 0; t.action_param = 0.0
         c = _client('srv', CreateTaskById, 'server/CreateTaskById'); r = CreateTaskById.Request(); r.navigation_mode = 0
     r.max_speed = NAV_SPEED; r.max_loop_times = 1; r.target_list = [t]
+    plan_done('navigation task')
     if not c.wait_for_service(timeout_sec=5):
         raise SystemExit('ABORT: navigation service not available')
     f = c.call_async(r); rclpy.spin_until_future_complete(n, f, timeout_sec=10); res = f.result()
@@ -576,9 +604,11 @@ def settled_pose(timeout=4.0):
         spin(0.4); cur = map_pose()
         if (math.hypot(cur[0] - last[0], cur[1] - last[1]) < 0.003
                 and abs((cur[2] - last[2] + math.pi) % (2 * math.pi) - math.pi) < math.radians(0.2)):
+            input_ready()
             return cur
         last = cur
     log('  localisation still moving after %.0f s - using the latest pose' % timeout)
+    input_ready()
     return last
 
 
@@ -628,24 +658,32 @@ def _normals_xy(ref, radius=0.06):
     """Unit surface normal in the horizontal plane per reference point (PCA of its 3-D neighbours' x, y) and
     whether that point lies on a clear vertical surface (thin, elongated neighbourhood)."""
     from scipy.spatial import cKDTree
-    tree = cKDTree(ref); nrm = np.zeros((len(ref), 2)); good = np.zeros(len(ref), bool)
-    for i, nb in enumerate(tree.query_ball_point(ref, radius)):
-        if len(nb) < 5:
-            continue
-        q = ref[nb, :2] - ref[nb, :2].mean(0); w, v = np.linalg.eigh(q.T @ q)
-        if w[1] > 1e-6 and w[0] < 0.1 * w[1]:
-            nrm[i] = v[:, 0]; good[i] = True
+    # vectorised: the K nearest neighbours within `radius` (a per-point Python loop took ~4 s for the D scan)
+    K = 32
+    d, idx = cKDTree(ref).query(ref, k=min(K, len(ref)), distance_upper_bound=radius)
+    ok = np.isfinite(d); cnt = ok.sum(1)
+    P = ref[np.where(ok, idx, 0), :2] * ok[..., None]
+    mean = P.sum(1) / np.maximum(cnt, 1)[:, None]
+    Q = (P - mean[:, None, :]) * ok[..., None]
+    w, v = np.linalg.eigh(np.einsum('nki,nkj->nij', Q, Q))
+    good = (cnt >= 5) & (w[:, 1] > 1e-6) & (w[:, 0] < 0.1 * w[:, 1])
+    nrm = np.where(good[:, None], v[:, :, 0], 0.0)
     return nrm, good
 
 
-def icp2d(src, ref, max_d=0.30, iters=30, nrm=None):
+ICP_MAX_SRC = 6000      # scan points used by the ICP (random subset): enough for 3 parameters, ~3x faster
+
+
+def icp2d(src, ref, max_d=0.30, iters=30, nrm=None, tree=None):
     """Trimmed point-to-plane ICP on 3-D points, solving only the planar motion (x, y, yaw):
     (R, t, rms, inlier fraction) with ref_xy ~ R @ src_xy + t, or None."""
     from scipy.spatial import cKDTree
     if nrm is None:
         nrm = _normals_xy(ref)
     nv, good = nrm
-    tree = cKDTree(ref); th = 0.0; t = np.zeros(2); rms = None; frac = 0.0
+    if len(src) > ICP_MAX_SRC:
+        src = src[np.random.default_rng(0).choice(len(src), ICP_MAX_SRC, replace=False)]
+    tree = tree if tree is not None else cKDTree(ref); th = 0.0; t = np.zeros(2); rms = None; frac = 0.0
     for _ in range(iters):
         c, s_ = math.cos(th), math.sin(th); R = np.array([[c, -s_], [s_, c]])
         sx = src[:, :2] @ R.T + t
@@ -675,12 +713,21 @@ def icp2d(src, ref, max_d=0.30, iters=30, nrm=None):
 _REF_NRM = {}
 
 
+def ref_data(name):
+    """Reference scan of `name` with its normals and search tree, prepared once per file (docking calls this at
+    the start, so the planning steps later only run the matching)."""
+    from scipy.spatial import cKDTree
+    f = os.path.join(REF_DIR, name + '.npy')
+    key = (f, os.path.getmtime(f))
+    if _REF_NRM.get(name, (None,))[0] != key:
+        ref = np.load(f); _REF_NRM[name] = (key, ref, _normals_xy(ref), cKDTree(ref))
+    return _REF_NRM[name]
+
+
 def ref_offset(name):
     """(dx, dy, dyaw) in the robot frame from here to the pose where the reference scan of `name` was taken."""
-    ref = np.load(os.path.join(REF_DIR, name + '.npy'))
-    if name not in _REF_NRM:
-        _REF_NRM[name] = _normals_xy(ref)
-    r = icp2d(scan2d(), ref, nrm=_REF_NRM[name])
+    _, ref, nrm, tree = ref_data(name)
+    r = icp2d(scan2d(), ref, nrm=nrm, tree=tree)
     if r is None:
         raise SystemExit('ABORT: the scan does not match the reference of %s (too few common points)' % name)
     R, t, rms, frac = r; th = math.atan2(R[1, 0], R[0, 0])
@@ -1122,6 +1169,8 @@ elif cmd in ('dock', 'redock'):
     name = args[0]; st = load_st()[name]; gap = float(args[1]) if len(args) > 1 else st['gap']; YLIM[0] = 2.5
     ZB[0], ZB[1] = st['z']
     jittered = False                            # navigated to a random spot near the safe point (--jitter)
+    if os.path.exists(os.path.join(REF_DIR, name + '.npy')):
+        ref_data(name)                          # prepare the reference now, not inside a planning step
     # fine-tune: lat_offset (m, + = robot further left) shifts the lateral target; yaw_offset (deg, + = left)
     st['end_y'] = st.get('end_y', 0.0) - float(st.get('lat_offset', 0.0)); YAW_OFF[0] = math.radians(float(st.get('yaw_offset', 0.0)))
     if st.get('no_staging') and cmd == 'dock':
@@ -1399,6 +1448,40 @@ elif cmd in ('dock', 'redock'):
             if new:
                 fh.write('time,name,gap_target,gap,ang_deg,lat_err,fwd' + chr(10))
             fh.write('%s,%s,%.3f,%.4f,%.2f,%.4f,%.4f' %  (time.strftime('%H:%M:%S'), name, gap, f['gap'], f['ang_deg'], res['lat_err'], fwd) + chr(10))
+elif cmd == 'bench':
+    # bench [NAME] : NO MOTION.  Planning time on ONE lidar snapshot (taken first, not counted): every check and
+    # computation the docking runs between receiving data and issuing a command.  Requirement: < PLAN_LIMIT_MS.
+    name = args[0] if args else 'D'; st = load_st()[name]; YLIM[0] = 2.5; ZB[0], ZB[1] = st['z']
+    YAW_OFF[0] = math.radians(float(st.get('yaw_offset', 0.0)))
+    st['end_y'] = st.get('end_y', 0.0) - float(st.get('lat_offset', 0.0))
+    has_ref = os.path.exists(os.path.join(REF_DIR, name + '.npy'))
+    if has_ref:
+        t = time.time(); ref_data(name); log('prepare reference (start of a docking, not timed): %.0f ms' % (1000 * (time.time() - t)))
+    _FROZEN[0] = cloud(fresh=True); log('snapshot: %d points' % len(_FROZEN[0]))
+    res = []
+
+    def tm(label, f):
+        t = time.time()
+        try:
+            r = f()
+        except SystemExit as e:
+            r = 'stops: %s' % e
+        ms = 1000 * (time.time() - t); res.append((label, ms)); log('%-44s %7.1f ms   %s' % (label, ms, str(r)[:90]))
+        return r
+    tm('turn in place clear? (rotation_hits)', lambda: RM.rotation_hits(cloud(), CFG))
+    tm('move to a turning spot (leave_move)', lambda: RM.leave_move(cloud(), CFG, 0.6))
+    tm('turn 45 deg (turn_hits)', lambda: RM.turn_hits(cloud(), CFG, math.radians(45)))
+    tm('straight back 0.6 m (sweep_hits)', lambda: RM.sweep_hits(cloud(), CFG, -0.6, 0.0))
+    tm('sideways 0.5 m (sweep_hits)', lambda: RM.sweep_hits(cloud(), CFG, 0.0, 0.5))
+    m = tm('face fit (measure)', lambda: measure() or measure(near=True))
+    if isinstance(m, dict) and st.get('mode') != 'map':
+        tm('approach plan (plan_approach)', lambda: plan_approach(m, st, st['gap']))
+    if has_ref:
+        tm('reference scan match (ref_offset)', lambda: ref_offset(name))
+    worst = max(ms for _, ms in res)
+    log('BENCH %s: slowest step %.0f ms, all steps together %.0f ms (limit %d ms per planning step)'
+        % (name, worst, sum(ms for _, ms in res), PLAN_LIMIT_MS))
+    _FROZEN[0] = None
 elif cmd == 'undock':
     # undock [MIN] : reverse straight out along the last docking approach (at least MIN m, default 0.30)
     d = json.load(open('/tmp/claude_dock_last.json'))['fwd']; assert 0 <= d <= MAX_FWD + 0.05
