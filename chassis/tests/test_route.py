@@ -35,7 +35,7 @@ class WaypointTests(unittest.TestCase):
         rng = random.Random(1)
         picks = [RT.choose_via(T["staging_pose"], D["staging_pose"], WPS, "random", rng)[0] for _ in range(200)]
         self.assertEqual(set(picks), {None, "W1"})
-        self.assertTrue(0.55 < picks.count("W1") / 200 < 0.85)
+        self.assertTrue(0.75 < picks.count("W1") / 200 < 0.95)
 
     def test_random_without_waypoints_is_direct(self):
         self.assertIsNone(RT.choose_via((0, 0), (3, 0), {}, "random")[0])

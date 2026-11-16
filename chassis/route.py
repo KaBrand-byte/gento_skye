@@ -12,7 +12,7 @@ Everything here only PICKS targets; all motion and every clearance check stays i
 import json, math, os, random
 
 WAYPOINT_FILE = 'waypoints.json'
-VIA_P = 0.7              # --via random: chance of going through a waypoint at all
+VIA_P = 0.85             # --via random: chance of going through a waypoint at all
 VIA_MAX_DETOUR = 1.5     # via-path length <= direct * this + VIA_EXTRA
 VIA_EXTRA = 0.8         # m
 VIA_MIN_DIST = 0.8       # m: a waypoint this close to the start or the destination adds nothing

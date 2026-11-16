@@ -556,12 +556,13 @@ def model_hits_mask(p, fwd, sz, place):
 SURF = [None]          # top of the work surface for this docking (see plan_approach)
 
 
-def plan_approach(m, st, gap):
+def plan_approach(m, st, gap, dy=None):
     """Check the final approach to the TAUGHT pose (the arm motion is hard-coded, so the base never picks
     another spot): sideways move to the taught lateral position, straight forward to the taught gap, and -
     for a place station - the spot under the tray must be empty.  Any problem -> stop and report."""
     p = RM.remove_self(cloud(), CFG)                          # own points out BEFORE the cloud is shifted below
-    dy = lat_error(m, st, gap)                                 # +: robot must move left
+    if dy is None:
+        dy = lat_error(m, st, gap)                             # +: robot must move left (face edge)
     fwd = m['dist'] - FRONT - gap
     if SURF[0] is None:
         # measured once, from the first (farthest) view: close to the edge the belt is seen at a grazing angle
@@ -1033,6 +1034,10 @@ class NavTrace:
             (' (' + ', '.join('%s %.1f s' % (stamp(a), b) for a, b in pauses[:6]) + ')') if pauses else '', rev))
 
 
+NEAR_STOP = 0.15        # m: this close to a safe point / waypoint the navigation is stopped (arrived)
+NEAR_DWELL = 3.0        # s: this long within STAGING_TOL (manoeuvring around it) also counts as arrived
+
+
 def wait_task(tmo=150, near=None, tol=STAGING_TOL):
     """Wait until the navigation task is gone.  The vendor server keeps a station task open when the robot
     stops a few cm off the node ("Current Pos Without Node"); so if we are within `tol` of the staging point
@@ -1044,6 +1049,7 @@ def wait_task(tmo=150, near=None, tol=STAGING_TOL):
         rclpy.spin_once(n, timeout_sec=0.05)
         if mw:
             mw.poll()
+    zone = None
     while time.time() - t0 < tmo:
         q = urllib.request.Request('http://127.0.0.1:8080/api/Task/GetAllTask', data=b'{}',
                                    headers={'Content-Type': 'application/json'})
@@ -1056,10 +1062,20 @@ def wait_task(tmo=150, near=None, tol=STAGING_TOL):
             x, y, yaw = map_pose()
             if last is None or math.hypot(x - last[0], y - last[1]) > 0.005 or abs(yaw - last[2]) > 0.005:
                 still = time.time(); last = (x, y, yaw)
-            if math.hypot(x - near[0], y - near[1]) < tol and time.time() - still > 1.5:
-                log('arrived %.3f m from staging but the server keeps the task open: cancelling it' % math.hypot(x - near[0], y - near[1]))
+            dd = math.hypot(x - near[0], y - near[1])
+            if dd < tol and time.time() - still > 1.5:
+                log('arrived %.3f m from staging but the server keeps the task open: cancelling it' % dd)
                 tr.summary(); cancel_all_tasks(); return True
-        for _ in range(10):
+            # the safe point is only a place to turn: the vendor otherwise keeps manoeuvring onto the exact pose
+            # (2026-11-16 at D: 22 s of reversing and turning within 0.3 m of it)
+            if dd < NEAR_STOP:
+                log('within %.2f m of the safe point: navigation stopped there' % dd)
+                cancel_all_tasks(); spin(0.5); tr.summary(); return True
+            zone = (zone or time.time()) if dd < tol else None
+            if zone and time.time() - zone > NEAR_DWELL:
+                log('%.0f s within %.2f m of the safe point (%.2f m now): navigation stopped there' % (NEAR_DWELL, tol, dd))
+                cancel_all_tasks(); spin(0.5); tr.summary(); return True
+        for _ in range(4):
             rclpy.spin_once(n, timeout_sec=0.05)
             if mw:
                 mw.poll()
@@ -1555,8 +1571,11 @@ elif cmd in ('dock', 'redock'):
             rel(first + FWD_SHORT, 0.0); total += first + FWD_SHORT
             m = measure_station(st, gap, m['dist'] - first)
             log('  stage 2 measure', pub(m))
-            plan_approach(m, st, gap)
+        # from here on the sideways position comes from the reference scan only: close to D the face end jumps
+        # between pieces (2026-11-16: -0.06 m at the safe point, +0.20 m at stage 2 -> a planned 0.47 m sideways
+        # move, stopped by the clearance check)
         rx, ry, ra = ref_offset(name)
+        plan_approach(m, st, gap, dy=ry)
         if abs(ra) > math.radians(1.0):
             need_clear(RM.turn_hits(accepted_filter(RM.remove_self(cloud(), CFG), st, rx, ry), CFG, ra), 'heading correction')
             rel(0.0, ra)
