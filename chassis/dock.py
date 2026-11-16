@@ -39,6 +39,8 @@ ROT_SHORT = math.radians(0.77)   # measured rotation shortfall of MoveRelative
 FWD_SHORT = 0.011                # measured: straight moves stop ~11 mm short
 FWD_SHORT_LAST = 0.005           # measured on the ~0.3 m last stage at D: 11 mm overshot by 3-8 mm
 YLIM = [0.9]
+REAR_MIN = float(os.environ.get('GENTO_REAR_MIN', '0.10'))   # m: rear ultrasonic stop while reversing
+                                 # (was 0.25; T has fixed structure ~16 cm behind the chassis)
 ZB = [0.10, 0.70]      # height band used for the face fit (override: --z LO HI)
 
 rclpy.init()
@@ -251,8 +253,8 @@ def rel(x=0.0, yaw=0.0, rear_check=False, y=0.0):
     rf = gh.get_result_async(); t0 = time.time()
     while not rf.done() and time.time() - t0 < 60:
         rclpy.spin_once(n, timeout_sec=0.05)
-        if rear_check and U[0] and min(U[0].get(5, 9), U[0].get(6, 9)) < 0.25:
-            log('SAFETY: rear < 0.25 m, cancel'); cf = gh.cancel_goal_async()
+        if rear_check and U[0] and min(U[0].get(5, 9), U[0].get(6, 9)) < REAR_MIN:
+            log('SAFETY: rear < %.2f m, cancel' % REAR_MIN); cf = gh.cancel_goal_async()
             rclpy.spin_until_future_complete(n, cf, timeout_sec=3); raise SystemExit(1)
     r = rf.result().result if rf.done() else None; spin(0.4)      # let the chassis settle before measuring
     log('  rel move x=%.3f y=%.3f yaw=%.2fdeg -> %s' % (x, y, math.degrees(yaw), (r.error_code, r.error_msg) if r else 'TIMEOUT'))
