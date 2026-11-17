@@ -132,6 +132,93 @@ class SshTransportTests(unittest.TestCase):
             GentoNavigation(transport="udp")
 
 
+class SilentBridgeTests(unittest.TestCase):
+    """ROS transport while the bridge is silent (2026-11-17: > 3 s without status on the loaded chassis; the task
+    aborted and its ROS stop never arrived - the chassis drove on alone): SSH fallback for status and stop."""
+
+    def nav(self, status_age):
+        nav = GentoNavigation(transport="ssh")
+        nav.transport = "ros"
+        nav._publisher = mock.Mock(); nav._publisher.get_subscription_count.return_value = 0
+        nav._string = lambda data: data
+        nav._status = {"job": {"state": "running", "job": "D", "t": 100}}
+        nav._status_at = __import__("time").monotonic() - status_age
+        nav.active, nav._seen_active = "D", True
+        return nav
+
+    def ssh(self, outputs):
+        calls = []
+
+        def fake_run(argv, **kwargs):
+            calls.append(argv)
+            out = outputs.pop(0)
+            if isinstance(out, Exception):
+                raise out
+            return subprocess.CompletedProcess(argv, 0, stdout=out, stderr="")
+        return calls, mock.patch("gento_navigation.subprocess.run", side_effect=fake_run)
+
+    def test_fresh_ros_status_needs_no_ssh(self):
+        calls, patch = self.ssh([])
+        with patch:
+            self.assertEqual(self.nav(0.5).job_status()["state"], "running")
+        self.assertEqual(calls, [])
+
+    def test_stale_ros_status_is_read_over_ssh(self):
+        calls, patch = self.ssh([json.dumps({"state": "done", "job": "D", "t": 200}) + "\n"])
+        with patch:
+            nav = self.nav(4.0)
+            self.assertTrue(nav.is_arrived_and_stopped())       # the arrival came over SSH
+        self.assertEqual(calls[0][-2], "sunrise@6.6.7.6")
+        self.assertIn("job_status.json", calls[0][-1])
+
+    def test_short_silence_without_ssh_keeps_the_last_status(self):
+        calls, patch = self.ssh([subprocess.TimeoutExpired("ssh", 5)])
+        with patch:
+            nav = self.nav(5.0)
+            self.assertEqual(nav.job_status()["state"], "running")   # not an abort yet
+            nav._status_at -= 20.0; nav._ssh_tried = 0.0
+        calls, patch = self.ssh([subprocess.TimeoutExpired("ssh", 5)])
+        with patch, self.assertRaises(NavigationError) as cm:
+            nav.job_status()
+        self.assertIn("ROS 与 ssh 都已 15 s 无应答", str(cm.exception))
+
+    def test_stop_goes_over_ssh_when_the_bridge_is_silent(self):
+        calls, patch = self.ssh([""])
+        with patch:
+            nav = self.nav(6.0)
+            nav.stop()
+        self.assertEqual(len(calls), 1)
+        self.assertTrue(calls[0][-1].endswith("run.sh stop"))
+        self.assertIsNone(nav.active)
+
+    def test_ros_stop_failure_falls_back_to_ssh(self):
+        calls, patch = self.ssh([""])
+        with patch, mock.patch.object(GentoNavigation, "_ros_command", side_effect=NavigationError("未发现底盘导航桥")):
+            self.nav(0.5).stop()
+        self.assertTrue(calls[0][-1].endswith("run.sh stop"))
+
+
+class BridgeJobStatusTests(unittest.TestCase):
+    def test_reads_the_status_file_like_run_sh(self):
+        import importlib.util
+        import os
+        import tempfile
+        for m in ("rclpy", "rclpy.node", "rclpy.qos", "std_msgs", "std_msgs.msg", "slam", "slam.msg"):
+            sys.modules.setdefault(m, mock.MagicMock())
+        spec = importlib.util.spec_from_file_location("dock_bridge", str(Path(__file__).resolve().parents[1] / "dock_bridge.py"))
+        bridge = importlib.util.module_from_spec(spec); spec.loader.exec_module(bridge)
+        with tempfile.TemporaryDirectory() as tmp:
+            bridge.JS, bridge.PIDF = os.path.join(tmp, "job_status.json"), os.path.join(tmp, "run.pid")
+            self.assertEqual(bridge.read_job(), {"state": "idle"})
+            Path(bridge.JS).write_text(json.dumps({"state": "running", "job": "D"}))
+            Path(bridge.PIDF).write_text(str(os.getpid()))
+            self.assertEqual(bridge.read_job()["state"], "running")             # the job process is alive
+            Path(bridge.PIDF).write_text("999999999")
+            self.assertEqual(bridge.read_job(), {"state": "failed", "error": "job died"})
+            Path(bridge.JS).write_text(json.dumps({"state": "done", "job": "D", "final": "FINAL {}"}))
+            self.assertEqual(bridge.read_job()["state"], "done")
+
+
 class RobotModelTests(unittest.TestCase):
     """The collision model on synthetic clouds (needs numpy)."""
     def setUp(self):

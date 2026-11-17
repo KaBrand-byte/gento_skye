@@ -17,7 +17,24 @@ from rclpy.qos import QoSProfile, DurabilityPolicy, ReliabilityPolicy, HistoryPo
 from std_msgs.msg import String
 from slam.msg import LocationData
 
-RUN = ['bash', os.path.join(os.path.dirname(os.path.abspath(__file__)), 'run.sh')]
+HERE = os.path.dirname(os.path.abspath(__file__))
+RUN = ['bash', os.path.join(HERE, 'run.sh')]
+JS, PIDF = os.path.join(HERE, 'job_status.json'), os.path.join(HERE, 'run.pid')
+
+
+def read_job():
+    """What 'run.sh job-status' prints: job_status.json, or a running job whose process is gone -> failed."""
+    if not os.path.exists(JS):
+        return {'state': 'idle'}
+    with open(JS) as fh:
+        job = json.load(fh)
+    if job.get('state') == 'running':
+        try:
+            with open(PIDF) as fh:
+                os.kill(int(fh.read().strip()), 0)
+        except (OSError, ValueError):
+            return {'state': 'failed', 'error': 'job died'}
+    return job
 
 
 class Bridge(Node):
@@ -36,11 +53,12 @@ class Bridge(Node):
         p = m.pose; self.pose = [round(p.position.x, 3), round(p.position.y, 3), round(math.degrees(p.orientation.z), 1)]
 
     def poll_job(self):
+        """job_status.json read directly - like 'run.sh job-status', whose bash sources the ROS environment on
+        every call: 3.8 s and 2.7 s of CPU each on the loaded chassis (load 14 on 4 cores), every 0.5 s - the job
+        status lagged ~4 s and the status to the Orin once stopped for > 3 s (2026-11-17)."""
         while rclpy.ok():
             try:
-                out = subprocess.run(RUN + ['job-status'], capture_output=True, text=True, timeout=10).stdout.strip().splitlines()
-                if out:
-                    self.job = json.loads(out[-1])
+                self.job = read_job()
             except Exception as e:
                 self.job = {'state': 'unknown', 'error': str(e)}
             time.sleep(0.5)
