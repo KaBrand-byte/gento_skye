@@ -227,6 +227,10 @@ def _print_brief(report):
               f"目标 {angle(target)} rad，实际 {angle(actual)} rad，误差 {angle(error)} rad")
         print(f"  运动结束状态 {feedback.get('status_name', '未知')}，"
               f"退出状态 {final.get(name, {}).get('status_name', '未知')}")
+        if "torque_nm" in feedback:
+            feedforward = active["commanded_hold_torque_nm"][name]
+            print(f"  末次前馈 {feedforward:+.3f} N·m，反馈力矩 {feedback['torque_nm']:+.3f} N·m，"
+                  f"MOS／电机温度 {feedback['mos_temperature_c']}/{feedback['motor_temperature_c']} °C")
     if report.get("disable_on_exit"):
         print(f"退出失能: {report['disable_on_exit']}")
     if report.get("error"):

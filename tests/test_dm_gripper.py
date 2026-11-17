@@ -230,6 +230,42 @@ class DriverTests(unittest.TestCase):
         self.assertGreater(closed["feedback"]["left"]["position_rad"], .54)
         self.assertLess(closed["feedback"]["right"]["position_rad"], .46)
 
+    def test_close_ramps_signed_hold_torque_and_open_clears_it(self):
+        self.driver.config = replace(
+            self.config, motion_timeout_seconds=2,
+            left=replace(self.config.left, hold_torque_nm=.2),
+            right=replace(self.config.right, close_direction=-1, hold_torque_nm=.3))
+        targets = {"left": .54, "right": .46}
+        self.driver.enable()
+        closed = self.driver.move_to(targets, action="close")
+        self.assertEqual(closed["commanded_hold_torque_nm"], {"left": .2, "right": -.3})
+        self.driver.freeze()
+        opened = self.driver.move_to({"left": .5, "right": .5}, action="open")
+        self.assertEqual(opened["commanded_hold_torque_nm"], {"left": 0, "right": 0})
+
+        for name, bus in zip(self.driver.sides, self.buses.values()):
+            with self.subTest(side=name):
+                final = encode_mit(targets[name], torque_nm=closed["commanded_hold_torque_nm"][name])
+                zero_torque = encode_mit(0)[-2:]
+                frames = [frame for _, frame in bus.sent if frame != ENABLE]
+                first_hold = next(i for i, frame in enumerate(frames) if frame[-2:] != zero_torque)
+                full_hold = frames.index(final)
+                self.assertEqual(frames[first_hold][:2], final[:2])
+                self.assertGreater(full_hold, first_hold)
+                first_open = next(i for i in range(full_hold + 1, len(frames))
+                                  if frames[i][:2] != final[:2])
+                self.assertTrue(all(frame[-2:] == zero_torque for frame in frames[first_open:]))
+
+    def test_close_timeout_does_not_start_hold_torque(self):
+        self.driver.config = replace(
+            self.config, left=replace(self.config.left, hold_torque_nm=.2))
+        self.buses["vcan0"].track_target = False
+        self.driver.enable()
+        with self.assertRaisesRegex(MotionError, "执行超时"):
+            self.driver.move_to({"left": .54, "right": .54}, action="close")
+        self.assertTrue(all(frame[-2:] == encode_mit(0)[-2:]
+                            for _, frame in self.buses["vcan0"].sent if frame != ENABLE))
+
     def test_invalid_open_close_request_does_not_change_targets(self):
         self.driver.enable()
         targets = self.driver.snapshot()["targets_rad"]
