@@ -750,6 +750,10 @@ def turn_to(h):
 MAP_TOL = 0.04                  # m: near T the map pose jumps by up to ~10 cm after small moves (measured), so
 MAP_ANG = math.radians(1.5)     # corrections below this only chase localisation noise
 MAP_CORRECTIONS = 1             # after the main translation
+MAP_TURNS = 3                   # heading corrections, counted apart from the translations
+MAP_SETTLE = 8.0                # s: wait this long for the localisation to settle at a map station (4 s once
+                                # was not enough after a 144 deg turn at T's safe point, 2026-11-17)
+MAP_REF_MAX = 0.30              # m: further than this from the station by the map -> no scan match, ABORT
 MAP_MAX_MOVE = 2.5              # m: longest straight translation from the safe point to the station
 
 
@@ -766,26 +770,37 @@ def ready_to_move():
         log('chassis ready to move (soft manual, parking released): %.0f ms, before capturing input' % (1000 * (time.time() - t)))
 
 
+def loc_state():
+    """The vendor localisation's own confidence (0-100) and relocating flag of the latest pose message."""
+    m = _POSE[0]
+    return getattr(m, 'confidence', None), getattr(m, 'is_relocating', None)
+
+
 def settled_pose(timeout=4.0):
     """Map pose once the localisation has caught up after a move (measured: it keeps correcting for ~1 s after
-    the robot stops; with a fixed short wait the corrections chased stale poses by up to 10 cm)."""
+    the robot stops; with a fixed short wait the corrections chased stale poses by up to 10 cm).  Not settled
+    while the vendor localisation says it is relocating.  Logs its confidence (2026-11-17: once, after a 144 deg
+    turn at T's safe point, the pose kept moving for > 4 s and then jumped 7 cm / 3 deg - cause unknown)."""
     ready_to_move()
-    spin(0.4); last = map_pose(); t0 = time.time()
+    spin(0.4); first = last = map_pose(); t0 = time.time()
     while time.time() - t0 < timeout:
-        spin(0.4); cur = map_pose()
-        if (math.hypot(cur[0] - last[0], cur[1] - last[1]) < 0.003
+        spin(0.4); cur = map_pose(); conf, reloc = loc_state()
+        if (not reloc and math.hypot(cur[0] - last[0], cur[1] - last[1]) < 0.003
                 and abs((cur[2] - last[2] + math.pi) % (2 * math.pi) - math.pi) < math.radians(0.2)):
-            input_ready('pose settled (%.3f, %.3f, %.1f deg)' % (cur[0], cur[1], math.degrees(cur[2])))
+            input_ready('pose settled (%.3f, %.3f, %.1f deg) conf %s' % (cur[0], cur[1], math.degrees(cur[2]), conf))
             return cur
         last = cur
-    log('  localisation still moving after %.0f s - using the latest pose' % timeout)
+    conf, reloc = loc_state()
+    log('  localisation still moving after %.0f s - using the latest pose (moved %.3f m / %.1f deg while waiting, '
+        'conf %s, relocating %s)' % (timeout, math.hypot(last[0] - first[0], last[1] - first[1]),
+                                     math.degrees((last[2] - first[2] + math.pi) % (2 * math.pi) - math.pi), conf, reloc))
     input_ready('pose (still moving) (%.3f, %.3f, %.1f deg)' % (last[0], last[1], math.degrees(last[2])))
     return last
 
 
-def rel_target(pose_deg):
+def rel_target(pose_deg, settle=4.0):
     """(dx, dy, dyaw) from the current (settled) map pose to a map pose [x, y, yaw_deg], in the robot frame."""
-    x, y, yaw = settled_pose(); tx, ty, th = pose_deg; th = math.radians(th)
+    x, y, yaw = settled_pose(settle); tx, ty, th = pose_deg; th = math.radians(th)
     c, s = math.cos(yaw), math.sin(yaw); wx, wy = tx - x, ty - y
     return c * wx + s * wy, -s * wx + c * wy, (th - yaw + math.pi) % (2 * math.pi) - math.pi
 
@@ -1045,28 +1060,36 @@ def map_approach(name, st, dry):
     has_ref = os.path.exists(os.path.join(REF_DIR, name + '.npy'))
     # with a reference scan only the main move uses the map: map corrections near T chase ~10 cm jumps and the
     # scan match then has to undo them (measured: +9 cm by the map, -8 cm back by the scan)
-    for it in range(2 if has_ref else 2 + MAP_CORRECTIONS):
-        dx, dy, da = rel_target(st['pose'])
-        log('map approach %d: to go x %.3f y %.3f m, yaw %.2f deg' % (it, dx, dy, math.degrees(da)))
+    # heading corrections are counted on their own: two in a row once used up the whole budget and the scan match
+    # then ran 0.7 m short of T (4% matched -> ABORT, 2026-11-17)
+    moves, turns, it = 0, 0, 0
+    while True:
+        dx, dy, da = rel_target(st['pose'], settle=MAP_SETTLE)
+        log('map approach %d: to go x %.3f y %.3f m, yaw %.2f deg' % (it, dx, dy, math.degrees(da))); it += 1
         if math.hypot(dx, dy) <= MAP_TOL and abs(da) <= MAP_ANG:
             break
         if math.hypot(dx, dy) > MAP_MAX_MOVE:
             raise SystemExit('ABORT: station %.2f m away from the safe point (check localisation)' % math.hypot(dx, dy))
         if dry:
             log('  (dry) path clear:', not RM.sweep_hits(cloud(), CFG, dx, dy)); return
-        if abs(da) > MAP_ANG:
-            if abs(da) > math.radians(12):
-                raise SystemExit('ABORT: heading %.1f deg off before translating' % math.degrees(da))
+        if abs(da) > math.radians(12):
+            raise SystemExit('ABORT: heading %.1f deg off before translating' % math.degrees(da))
+        if abs(da) > MAP_ANG and turns < MAP_TURNS:
             need_clear(RM.turn_hits(cloud(), CFG, da), 'heading correction')
-            rel(0.0, da + math.copysign(min(ROT_SHORT, abs(da) / 2), da))
+            rel(0.0, da + math.copysign(min(ROT_SHORT, abs(da) / 2), da)); turns += 1
             continue                            # the frame turned: recompute the translation
-        translate(dx, dy)
-        if has_ref:
-            break                               # the scan match does the rest
-    else:
-        if not has_ref:
-            log('map approach: stopping after %d corrections' % it)
+        if math.hypot(dx, dy) <= MAP_TOL:
+            break                               # only the heading is left (turns used up): the scan match / final
+        translate(dx, dy); moves += 1
+        if has_ref or moves > MAP_CORRECTIONS:
+            break                               # with a reference scan the scan match does the rest
+    if not has_ref and moves > MAP_CORRECTIONS:
+        log('map approach: stopping after %d corrections' % (moves - 1))
     if has_ref:
+        dx, dy, da = rel_target(st['pose'], settle=MAP_SETTLE)
+        if math.hypot(dx, dy) > MAP_REF_MAX:
+            raise SystemExit('ABORT: still %.2f m from %s by the map before the scan match - the approach did not '
+                             'get there (localisation?)' % (math.hypot(dx, dy), name))
         # the map is only good to ~10 cm here: finish against the recorded reference scan
         dx, dy, da = ref_approach(name)
         log('FINAL', json.dumps(dict(name=name, mode='map+ref', err_x=round(dx, 4), err_y=round(dy, 4),

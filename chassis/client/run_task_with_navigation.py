@@ -572,7 +572,14 @@ class Trial:
                 result.finished_at = datetime.now(timezone.utc).isoformat()
             a.result.parent.mkdir(parents=True, exist_ok=True)
             write_report(a.result, result.to_dict())
-            print(f"执行结果: {a.result} ({result.status})")
+            back = result.metadata.get("return_status")
+            if result.status == "completed" and back:       # placed, but the way back failed: say so plainly
+                bar = "=" * 60
+                print(bar)
+                print(f"  放置成功，但返回 {a.start} 失败（{back}）：{result.metadata.get('return_error', '')}")
+                print(f"  机器人没有到 {a.start}。")
+                print(bar)
+            print(f"执行结果: {a.result} (放置 {result.status}" + (f"，返回 {a.start} {back}" if back else "") + ")")
         return exit_code
 
 

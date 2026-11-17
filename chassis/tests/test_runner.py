@@ -402,7 +402,13 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual([l["destination"] for l in report["metadata"]["navigation_legs"]], ["D"])
 
     def test_failure_on_the_way_back_keeps_the_placement_result(self):
-        code, report = self.run_trial(fail_on="undock")
+        import io
+        from contextlib import redirect_stdout
+        out = io.StringIO()
+        with redirect_stdout(out):
+            code, report = self.run_trial(fail_on="undock")
+        self.assertIn("放置成功，但返回 T 失败", out.getvalue())          # not just "(completed)"
+        self.assertIn("返回 T failed", out.getvalue())
         self.assertEqual(code, 1)
         self.assertEqual(report["status"], "completed")
         self.assertEqual(report["metadata"]["return_status"], "failed")
