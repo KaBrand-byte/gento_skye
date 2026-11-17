@@ -38,14 +38,25 @@ case "${1:-start}" in
       BODY="$TLOG.part"                         # the run as it happens; the response time goes on top at the end
       echo "===== $(date '+%F %T') gento task $i/$N: $*  (result $RES)" > "$BODY"
       L0=$(chlines)
+      # chassis eth1 (the link to this Orin) and load: 2026-11-17 its MAC TX path hung and was reset 39 times in
+      # 9 min (load 12-14 on 4 cores) - the bridge status and the stop were lost, the localisation reset
+      E0=$(ssh -o BatchMode=yes -o ConnectTimeout=5 "$CH" 'cat /sys/class/net/eth1/carrier_changes; cut -d" " -f1-3 /proc/loadavg' 2>/dev/null)
       GENTO_CYCLE="$i/$N" stdbuf -oL -eL python3 -u chassis/client/run_task_with_navigation.py \
         --config "${GENTO_TASK_CONFIG:-config/default.json}" --result "$RES" "$@" 2>&1 | tee -i -a "$BODY"
       rc=${PIPESTATUS[0]}; [ $rc -eq 0 ] && ok=$((ok + 1))
       echo "===== $(date '+%F %T') exit $rc" >> "$BODY"
-      OFF=""
+      OFF=""; NET=""
       if [ -n "$L0" ]; then                     # the chassis side of the same run (docking jobs, run.log)
         { echo "===== chassis ~/gento_dock/run.log from line $((L0 + 1))"
           ssh -o BatchMode=yes -o ConnectTimeout=5 "$CH" "tail -n +$((L0 + 1)) ~/gento_dock/run.log"; } >> "$BODY" 2>&1
+        E1=$(ssh -o BatchMode=yes -o ConnectTimeout=5 "$CH" 'cat /sys/class/net/eth1/carrier_changes; cut -d" " -f1-3 /proc/loadavg' 2>/dev/null)
+        C0=$(echo "$E0" | head -1); C1=$(echo "$E1" | head -1)
+        NET="chassis eth1 link changes during this run: $(( ${C1:-0} - ${C0:-0} ))   load before: $(echo "$E0" | tail -1)   after: $(echo "$E1" | tail -1)"
+        echo "===== $NET" >> "$BODY"
+        if [ -n "$C0" ] && [ -n "$C1" ] && [ "$C1" -gt "$C0" ]; then
+          { echo "===== chassis kernel log (eth1)"; ssh -o BatchMode=yes -o ConnectTimeout=5 "$CH" \
+              'dmesg -T | grep -E "eth1|tx_fifo|tx queue" | tail -n 60'; } >> "$BODY" 2>&1
+        fi
         T1=$(date +%s.%N); TC=$(ssh -o BatchMode=yes -o ConnectTimeout=5 "$CH" 'date +%s.%N' 2>/dev/null); T2=$(date +%s.%N)
         [ -n "$TC" ] && OFF=$(python3 -c "print('%.3f' % (($T1 + $T2) / 2 - $TC))")     # Orin clock - chassis clock
       else
@@ -56,6 +67,7 @@ case "${1:-start}" in
       PLACE=D; prev=""; for a in "$@"; do [ "$prev" = --place ] && PLACE=$a; prev=$a; done   # the leg that counts
       python3 chassis/client/response_summary.py "$BODY" --place "$PLACE" ${OFF:+--offset "$OFF"} --name "$(basename "$TLOG")" \
         --csv "$REPO/runs/response_times.csv" > "$TLOG.head" 2>&1
+      [ -n "$NET" ] && echo "$NET" >> "$TLOG.head"
       cat "$TLOG.head"
       { cat "$TLOG.head"; echo; cat "$BODY"; } > "$TLOG" && rm -f "$TLOG.head" "$BODY"
       echo "log: $TLOG"

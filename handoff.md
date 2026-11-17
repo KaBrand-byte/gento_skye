@@ -73,6 +73,8 @@ gento task-stop                     # 停止任务：双臂 + 底盘
   - Orin 端 ROS 状态超过 3 s 没更新时，改用 ssh 读作业状态（每秒最多一次）；ROS 和 ssh 都连续 15 s 无应答才判定失败；
   - 停车：导航桥无应答或 ROS 停止失败时，改用 ssh 执行 `run.sh stop`（依赖 `gento setup` 打通的免密登录）；
   - 底盘仍然很忙（厂家 linkhou 进程占满一个核、驱动约 53%），1 分钟平均负载约 10。
+  - **根本原因是底盘 eth1 掉线**：底盘时间 20:59:42–21:08:27，底盘连 Orin 的网口 eth1 掉线又恢复 39 次，内核报 `gmac_check_tx_fifo: tx queue:0 fifo is not empty`，是网卡发送队列卡住后被驱动重置。Orin 一侧 eth0 的 `carrier_changes` 一直是 2（只有开机那次），说明网线的物理连接没断过，问题在底盘网卡（hobot_gmac）这一侧。掉线导致导航桥状态中断、ROS 停止指令发不出去；21:05:19 厂家定位又因 IMU 超时被重置，之后一直全局重定位失败，后来按 D 的已知位置手动重定位才恢复（匹配度 0.94）。开机后 1.5 h 没出问题，具体诱因未定：可能是底盘负载过高（12–14，4 核），也可能是网卡驱动 TSO 等发送卸载功能的问题。每次运行的日志现在会记录这一轮 eth1 的掉线次数和运行前后的负载，有掉线时附上内核日志，方便对照。
+  - 可以尝试（需要 root，请人工决定）：`sudo ethtool -K eth1 tso off` 关掉 TSO 观察；或者把这个问题报给底盘厂家（hobot_gmac 发送队列卡住）。
 - **响应时间指标（测评最重要的指标）**：只统计交接完成、出发去 D 这一段（底盘作业“对接 D”），定义为环境信息首次输入（首帧激光点云快照交给规划）到首次下发底盘运动指令，要求小于 1200 ms。倒出 D、回 T，以及 `--handover` 交接前先开去 T 的那一段，都不计入。
   - 底盘每个作业都会写一行 `RESPONSE: first lidar input <epoch>（日期 时间）-> first chassis command <epoch>（日期 时间）= N ms OK/OVER`，同时追加到底盘的 `~/gento_dock/response_log.csv`（只追加，不覆盖）；
   - 每次 `gento task` 的日志文件**最顶上**是本次运行去 D 这一段的指标：两个时间戳都用底盘系统时间，同时换算成 Orin 时间，再给出间隔和是否合格；每次运行还会往 Orin 的 `~/gento_skye/runs/response_times.csv` 追加一行；
