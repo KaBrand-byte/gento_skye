@@ -68,6 +68,7 @@ gento task-stop                     # 停止任务：双臂 + 底盘
   - `--holding`：托盘已在夹爪中，不提示交接，直接去 D；
   - `--handover`：先导航到 T、张爪，再按上面的方式交接；
   - `--no-return`：放完不回 T。
+- **完整日志（11-17 起）**：每次 `gento task` 的终端完整输出另存为 Orin 上的 `~/gento_skye/runs/logs/task-日期-时间.log`（连续运行时每次一个 `…-c01.log`），窗口里最后一行会显示文件名。Orin 能免密登录底盘之后（`gento setup`），同一次运行的底盘日志 `run.log` 片段也会自动附在文件末尾；在此之前，底盘日志仍只在底盘的 `~/gento_dock/run.log` 里。
 - 结果：单次 `~/gento_skye/runs/with-navigation.json`；连续运行为 `runs/cycle-01.json …`，汇总在 `runs/cycles.log`。
 - 一次性设置（已完成第 1 条）：
   1. `ln -sf ~/gento_skye/tools/gento.sh ~/.local/bin/gento`（已做）；

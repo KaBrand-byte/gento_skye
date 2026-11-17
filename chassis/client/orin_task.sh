@@ -27,11 +27,27 @@ case "${1:-start}" in
     N=1; if [ "$1" = "--cycles" ]; then N=$2; shift 2; fi      # --cycles N: N full tasks in a row (success rate)
     ok=0; LOG="$REPO/runs/cycles.log"; mkdir -p "$REPO/runs"
     [ "$N" -gt 1 ] && echo "===== $(date '+%F %T') start $N cycles: $*" >> "$LOG"
+    LOGDIR="$REPO/runs/logs"; mkdir -p "$LOGDIR"; STAMP=$(date +%Y%m%d-%H%M%S)
+    CH=${GENTO_CHASSIS:-sunrise@6.6.7.6}
+    chlines() { ssh -o BatchMode=yes -o ConnectTimeout=5 "$CH" 'wc -l < ~/gento_dock/run.log' 2>/dev/null; }
     for i in $(seq 1 "$N"); do
       [ "$N" -gt 1 ] && echo && echo "=================== 第 $i/$N 次 ==================="
       RES="$REPO/runs/with-navigation.json"; [ "$N" -gt 1 ] && RES="$REPO/runs/cycle-$(printf %02d "$i").json"
-      GENTO_CYCLE="$i/$N" python3 chassis/client/run_task_with_navigation.py           --config "${GENTO_TASK_CONFIG:-config/default.json}" --result "$RES" "$@"
-      rc=$?; [ $rc -eq 0 ] && ok=$((ok + 1))
+      # the complete output of every run goes to runs/logs/ (tee -i: Ctrl-C stops the task, not the log)
+      TLOG="$LOGDIR/task-$STAMP.log"; [ "$N" -gt 1 ] && TLOG="$LOGDIR/task-$STAMP-c$(printf %02d "$i").log"
+      echo "===== $(date '+%F %T') gento task $i/$N: $*  (result $RES)" > "$TLOG"
+      L0=$(chlines)
+      GENTO_CYCLE="$i/$N" stdbuf -oL -eL python3 -u chassis/client/run_task_with_navigation.py \
+        --config "${GENTO_TASK_CONFIG:-config/default.json}" --result "$RES" "$@" 2>&1 | tee -i -a "$TLOG"
+      rc=${PIPESTATUS[0]}; [ $rc -eq 0 ] && ok=$((ok + 1))
+      echo "===== $(date '+%F %T') exit $rc" >> "$TLOG"
+      if [ -n "$L0" ]; then                     # the chassis side of the same run (docking jobs, run.log)
+        { echo "===== chassis ~/gento_dock/run.log from line $((L0 + 1))"
+          ssh -o BatchMode=yes -o ConnectTimeout=5 "$CH" "tail -n +$((L0 + 1)) ~/gento_dock/run.log"; } >> "$TLOG" 2>&1
+      else
+        echo "(chassis log not included: no key login Orin -> chassis yet - 'gento setup' once)" | tee -a "$TLOG"
+      fi
+      echo "log: $TLOG"
       [ "$N" -gt 1 ] && echo "$(date '+%F %T') cycle $i/$N exit $rc  (ok $ok/$i)  $RES" | tee -a "$LOG"
       [ $rc -ne 0 ] && break                     # state unknown after a failure: stop the series
     done
