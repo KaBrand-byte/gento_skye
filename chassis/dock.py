@@ -840,26 +840,70 @@ def rel_target(pose_deg, settle=4.0):
     return c * wx + s * wy, -s * wx + c * wy, (th - yaw + math.pi) % (2 * math.pi) - math.pi
 
 
-def translate(dx, dy):
-    """Straight translation without turning by (dx, dy) in the robot frame: one diagonal move, or sideways then
-    forward, or forward then sideways - the first whose swept volume is clear in the live cloud."""
-    if abs(dx) <= 0.005 and abs(dy) <= 0.005:
-        return            # nothing to move: no lidar snapshot (a needless one delayed the first command by 1.7 s)
-    p = cloud()
-    paths = [[(0.0, dy), (dx, 0.0)], [(dx, 0.0), (0.0, dy)]]     # pure moves only (see rel)
-    for path in paths:
+BLOCKED_DIR = os.path.join(HERE, 'blocked')   # lidar snapshots that blocked a straight move (diagnosis)
+BLOCKED_KEEP = 10                             # newest files kept (~3 MB each)
+TRANSLATE_WAIT = [None]                       # s: wait for a blocked straight move (None: BLOCK_WAIT)
+
+
+def save_blocked(p, tag, hits):
+    """Keep the snapshot that blocked a move (float32, base_link) so it can be looked at afterwards."""
+    try:
+        os.makedirs(BLOCKED_DIR, exist_ok=True)
+        f = os.path.join(BLOCKED_DIR, 'blocked-%s-%s.npy' % (time.strftime('%Y%m%d-%H%M%S'), tag))
+        np.save(f, np.asarray(p, np.float32))
+        for old in sorted(x for x in os.listdir(BLOCKED_DIR) if x.startswith('blocked-'))[:-BLOCKED_KEEP]:
+            os.remove(os.path.join(BLOCKED_DIR, old))
+        log('  blocking snapshot saved: %s (%s)' % (f, json.dumps(hits)))
+    except Exception as e:
+        log('  blocking snapshot not saved: %s' % e)
+
+
+def clear_path(p, dx, dy):
+    """The first of: sideways then forward, forward then sideways, whose swept volume is clear in p; else None."""
+    for path in ([(0.0, dy), (dx, 0.0)], [(dx, 0.0), (0.0, dy)]):     # pure moves only (see rel)
         q, ok = p, True
         for mx, my in path:
             if (abs(mx) > 1e-3 or abs(my) > 1e-3) and RM.sweep_hits(q, CFG, mx, my):
                 ok = False; break
             q = q - np.array([mx, my, 0.0])
         if ok:
-            for mx, my in path:
-                if abs(mx) > 0.005 or abs(my) > 0.005:
-                    rel(mx + (math.copysign(FWD_SHORT, mx) if abs(mx) > 0.05 else 0.0), 0.0, rear_check=mx < 0, y=my)
-            return
-    raise SystemExit('ABORT: no clear straight path to the station (x %.2f, y %.2f): %s'
-                     % (dx, dy, json.dumps(RM.sweep_hits(p, CFG, dx, dy))))
+            return path
+    return None
+
+
+def translate(dx, dy):
+    """Straight translation without turning by (dx, dy) in the robot frame: sideways then forward, or forward
+    then sideways - the first whose swept volume is clear in the live cloud.  Blocked: fresh scans for up to
+    BLOCK_WAIT s before giving up (2026-11-17: 24 lidar returns 2 mm inside the margin behind T, in one snapshot
+    only - nothing was there, the next approach from the same side was clear - aborted the return to T)."""
+    if abs(dx) <= 0.005 and abs(dy) <= 0.005:
+        return            # nothing to move: no lidar snapshot (a needless one delayed the first command by 1.7 s)
+    wait = BLOCK_WAIT if TRANSLATE_WAIT[0] is None else TRANSLATE_WAIT[0]
+    p = cloud(); t0 = time.time(); k = 0
+    while True:
+        path = clear_path(p, dx, dy)
+        if path:
+            break
+        hits = RM.sweep_hits(p, CFG, dx, dy)
+        if k == 0:
+            save_blocked(p, 'first', hits)
+        left = wait - (time.time() - t0)
+        if left <= 0 or _FROZEN[0] is not None:                 # a frozen snapshot never changes
+            if k > 0:
+                save_blocked(p, 'last', hits)
+            # BLOCKED (after waiting): the task on the Orin asks to clear it and press Enter to retry
+            raise SystemExit('ABORT: %sno clear straight path to the station (x %.2f, y %.2f): %s%s'
+                             % ('BLOCKED: ' if k else '', dx, dy, json.dumps(hits),
+                                (' - still there after %.0f s' % wait) if k else ''))
+        if k % 5 == 0:
+            log('WAITING: straight path (x %.2f, y %.2f) blocked by %s - fresh scans for %.0f s more'
+                % (dx, dy, json.dumps(hits), left))
+        k += 1; spin(1.0); p = cloud(fresh=True)
+    if k:
+        log('  straight path clear on a fresh scan after %d rescans (%.1f s)' % (k, time.time() - t0))
+    for mx, my in path:
+        if abs(mx) > 0.005 or abs(my) > 0.005:
+            rel(mx + (math.copysign(FWD_SHORT, mx) if abs(mx) > 0.05 else 0.0), 0.0, rear_check=mx < 0, y=my)
 
 
 # ---- reference-scan positioning (map stations with a recorded scan): ~1 cm instead of the map's ~10 cm ----
@@ -1832,14 +1876,18 @@ elif cmd in ('dock', 'redock'):
         if jittered and RM.rotation_hits(cloud(fresh=True), CFG):
             unjitter(st, 'turning is not clear here'); jittered = False
         if st.get('mode') == 'map':
+            if jittered:
+                TRANSLATE_WAIT[0] = 3.0     # one or two rescans (noise), then the taught safe point instead
             try:
                 map_approach(name, st, dry)
             except SystemExit as e:
                 # translate() checks before moving: from the jittered spot the straight path may be blocked
                 if not (jittered and 'no clear straight path' in str(e)):
                     raise
+                TRANSLATE_WAIT[0] = None
                 unjitter(st, 'no clear straight path from here'); jittered = False
                 map_approach(name, st, dry)
+            TRANSLATE_WAIT[0] = None
             setmode(0)
             raise SystemExit(0)
         if 'staging_pose' in st:   # pose tasks keep the start heading: turn to the face here (staging is clear all round)
