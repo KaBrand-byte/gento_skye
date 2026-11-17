@@ -29,7 +29,7 @@
 #   grip open|close [left|right]   only the grippers, arms do not move (not while a task runs: o / c there)
 #   task [args]    START THE FULL TASK (arms + navigation) in tmux on the Orin           (asks y/n)
 #                  handover where it stands: Enter closes the grippers, 1 = held, go / 0 = not right (grippers open, put it right) -> D -> place -> T
-#                  args e.g. --cycles 10 | --down-mm 120 | --holding | --no-return | --handover (drive to T first)
+#                  args e.g. --cycles 10 | --down-mm 120 | --holding | --no-return | --handover (drive to T first) | --finish-place 135 (place stopped at D: release, retract, back to T)
 #                  --random-route: also a random spot near the safe points (waypoints are random by default)
 #   task-attach    show the running task again (Ctrl-b d detaches; the task keeps running)
 #   task-stop      stop the task (arms + chassis) and software-stop the chassis

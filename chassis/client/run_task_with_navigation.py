@@ -30,6 +30,7 @@ from copy import deepcopy
 import dataclasses
 from datetime import datetime, timezone
 import logging
+import math
 import os
 from pathlib import Path
 import select
@@ -42,11 +43,13 @@ LINK_RELEASE_S = 2.0
 RANDOM_ROUTE_JITTER = 0.08  # m: --random-route, random spot within this of the taught safe points
 BLOCK_RETRIES = 5          # an object blocking the docking: ask to clear it and retry this often
 MAX_LIFT_ASSIST_MM = 60.0  # at most this much of the place descent is done by the lift instead of the arms
-PLACE_LIFT_MM = 50.0       # after the arms' descent the lift always lowers at least this much (tray set down on
-                           # the belt, not dropped on release: 15 and 30 mm were not enough at D, 2026-11-16)
+PLACE_DOWN_MM = 135.0      # total place descent (arms + lift).  Basket since 2026-11-17: the tray's 185 mm
+                           # (arms 135 + lift 50) pressed the basket into the belt and pushed the arms up -> 5 cm less
+PLACE_LIFT_MM = 0.0        # the lift lowers at least this much after the arms (tray: 50; basket: none needed)
 WRIST_ADJUST_DEG = 10.0    # arms in an older carry pose where only the two wrist joints differ by up to this: turn
                            # just the wrists to the configured carry pose (receive changed 2026-11-17)
-ARM_MARGIN_MM = 10.0      # stay this far inside the arms' planning limit (elbow not near straight)     # the controller refuses a new link (-22) for ~1 s after the previous one was closed
+FINISH_TOL_MM = 40.0       # --finish-place: up + back must end within this of the carry pose (tool position)
+ARM_MARGIN_MM = 10.0     # stay this far inside the arms' planning limit (elbow not near straight)     # the controller refuses a new link (-22) for ~1 s after the previous one was closed
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -115,7 +118,80 @@ class Trial:
                           "请先经过渡位把双臂移回准备位。"
                           f"当前关节: {[[round(v, 1) for v in arm] for arm in joints]}")
 
-    def attach_at_carry(self, wrists=False):
+    def _finish_plan(self, arm_up):
+        """Read-only: from the arms' current pose, where do up(arm_up) + back(forward) end?  None if within
+        FINISH_TOL_MM of the carry pose (tool position, both arms), else the reason."""
+        sdk, c = self._sdk, self.sequence.config
+        predicted = deepcopy(sdk.read())
+        shoulders = sdk.shoulders(predicted)
+        ends = [sdk.forward(i, predicted.joints[i]) for i in range(2)]      # tool poses, moved along below
+        for name, deltas, motion in (("up", [[0, 0, arm_up]] * 2, c.up),
+                                     ("back_to_carry", [[-c.forward_mm, 0, 0]] * 2, c.forward)):
+            starts = [sdk.forward(i, predicted.joints[i]) for i in range(2)]
+            targets = [translated(starts[i], local_displacement(shoulders[i], deltas[i])) for i in range(2)]
+            ends = [translated(ends[i], local_displacement(shoulders[i], deltas[i])) for i in range(2)]
+            try:
+                trajectories = sdk.plan_linear(predicted, starts, targets, motion)
+            except Exception as error:
+                return f"{name}: {error}"
+            for i, trajectory in enumerate(trajectories):
+                predicted.rt["arms"][i]["fb"]["fb_pos"] = trajectory.endpoint
+        off = []
+        for i in range(2):                                   # where the straight moves end vs the carry pose
+            carry = sdk.forward(i, c.receive[i])
+            off.append(math.dist([ends[i][k][3] for k in range(3)], [carry[k][3] for k in range(3)]))
+        self.finish_offsets_mm = [round(d, 1) for d in off]
+        if max(off) > FINISH_TOL_MM:
+            return f"上移 {arm_up:.0f} mm、后移 {c.forward_mm} mm 后离运输位 {self.finish_offsets_mm} mm（允许 {FINISH_TOL_MM:.0f}）"
+        return None
+
+    def finish_interrupted_place(self, arm_up):
+        """A place that stopped with the arms down at the place station (e.g. the basket pressed against the
+        belt, the arms pushed up: "升降调整期间双臂未保持静止"): release, lift back to the carry height, arms up by
+        `arm_up`, back by the forward distance -> carry pose.  Planned read-only first and refused unless that
+        ends near the carry pose.  The release does not require the arms to stand still: freed from the
+        basket they spring back to where they were commanded."""
+        seq, c = self.sequence, self.sequence.config
+        self.attach_at_carry(anywhere=True)
+        why = self._finish_plan(arm_up)
+        if why:
+            raise MotionError(f"收尾动作只读规划不通过（松爪前）：{why}")
+        logging.info("收尾规划通过（松爪前）：上移 %.0f、后移 %s 后离运输位 %s mm", arm_up, c.forward_mm, self.finish_offsets_mm)
+        seq.started = True
+        if self.gripper is not None:
+            logging.info("松开夹爪（双臂可能回弹到指令位置）")
+            seq._record("release", status="started", note="finish an interrupted place")
+            self.gripper.control(GripperTarget.BOTH, GripperAction.OPEN, seq._checkpoint)
+            seq._record("release", status="completed")
+        until, still_since = time.monotonic() + 10.0, None
+        while True:                                          # wait for the arms to stand still
+            feedback = seq.checked_feedback()
+            still = not any(abs(v) > c.joint_velocity_tolerance_deg_s for arm in feedback.rt["arms"]
+                            for v in arm["fb"]["fb_vel"])
+            still_since = (still_since or time.monotonic()) if still else None
+            if still_since and time.monotonic() - still_since >= 1.0:
+                break
+            if time.monotonic() > until:
+                raise MotionError("松爪后双臂 10 s 内未静止")
+            time.sleep(c.poll_seconds)
+        why = self._finish_plan(arm_up)
+        if why:
+            raise MotionError(f"收尾动作只读规划不通过（松爪后）：{why}")
+        logging.info("收尾规划通过（松爪后）：离运输位 %s mm", self.finish_offsets_mm)
+        lift = seq.checked_feedback().rt["lift"]["fb_pos"][0]
+        if abs(lift - c.receive_lift[0]) > c.fixed_lift_tolerance_mm:
+            seq._move_lift("place_lift_up", c.receive_lift[0])
+        seq._move_linear("up", [[0, 0, arm_up]] * 2, c.up)
+        seq._move_linear("back_to_carry", [[-c.forward_mm, 0, 0]] * 2, c.forward)
+        feedback = seq.checked_feedback()
+        if any(not seq._near(a, t) for a, t in zip(feedback.joints, c.receive)):
+            seq._move_joint("carry", c.receive)
+        seq.result.motion_completed = True
+        seq.result.status = "completed"
+        seq.result.finished_at = datetime.now(timezone.utc).isoformat()
+        seq._record("finished", status="completed", note="interrupted place finished")
+
+    def attach_at_carry(self, wrists=False, anywhere=False):
         """The arms already stand in the carry (receive) pose (e.g. left there by the previous run): do what
         skye_task's prepare() does to connect and enable - without any arm or lift motion.  The grippers are NOT
         opened here (a tray may still be held after a stop); a normal run opens them on arrival at the start
@@ -129,10 +205,13 @@ class Trial:
             gripper.reserve()
         seq.result.metadata = sdk.connect()
         feedback = sdk.read()
+        if anywhere:                                        # the lift may stand below the carry height (stopped
+            seq.fixed = {name: list(feedback.rt[name]["fb_pos"][:size])   # on its way down): its height now
+                         for name, size in FIXED_AXES.items()}             # is what has to stay put
         seq._guard(feedback, require_position=False)
         if any(state >= 3 for state in feedback.trajectory_states):
             raise MotionError("已有双臂轨迹正在执行，需人工处理")
-        if not wrists and any(not seq._near(a, t) for a, t in zip(feedback.joints, seq.config.receive)):
+        if not (wrists or anywhere) and any(not seq._near(a, t) for a, t in zip(feedback.joints, seq.config.receive)):
             raise MotionError("双臂已不在运输（接盘）位")
         seq.fixed = {name: list(feedback.rt[name]["fb_pos"][:size]) for name, size in FIXED_AXES.items()}
         sdk.enter_position(feedback, seq._checkpoint)
@@ -145,7 +224,9 @@ class Trial:
             logging.info("运输位姿态已更新：只转动腕部关节到新姿态 %s", [arm[5:] for arm in target])
             seq._move_joint("carry_wrists", target)
         seq._record("initialized", status="completed",
-                    note="wrists turned to the new carry pose" if wrists else "arms already in the carry pose: no arm motion")
+                    note="wrists turned to the new carry pose" if wrists else
+                    "attached where the arms stand (finish place)" if anywhere else
+                    "arms already in the carry pose: no arm motion")
         if gripper is not None:
             gripper.connect()                               # enables at the measured position: holds what it holds
         seq.prepared = True
@@ -407,6 +488,8 @@ class Trial:
     def run(self):
         a = self.args
         config = load_config(a.config)
+        if a.down_mm is None:
+            a.down_mm = PLACE_DOWN_MM                       # the basket's descent; skye_task's config stays as it is
         if a.down_mm is not None or a.up_mm is not None:      # this run only; the config file stays as it is
             down = config.down_mm if a.down_mm is None else a.down_mm
             config = dataclasses.replace(config, down_mm=down, up_mm=a.up_mm if a.up_mm is not None else down)
@@ -424,35 +507,38 @@ class Trial:
         old = {s: signal.signal(s, lambda *_: self.sequence.request_stop()) for s in (signal.SIGINT, signal.SIGTERM)}
         exit_code = 1
         try:
-            start_pose = self.arm_start(config)             # before any motion
-            if a.holding and start_pose == "prepare":
-                raise MotionError("--holding：双臂必须已在运输（接盘）位且夹着托盘")
-            if start_pose in ("carry", "carry_wrist"):
-                logging.info("双臂已在运输（接盘）位：%s，直接接入%s",
-                             "只转腕部到新姿态" if start_pose == "carry_wrist" else "不动手臂",
-                             "（夹着托盘，不张爪）" if a.holding else "")
-                self.attach_at_carry(wrists=start_pose == "carry_wrist")
+            if a.finish_place is not None:                  # a place stopped with the arms down: finish it
+                self.finish_interrupted_place(a.finish_place)
             else:
-                self.sequence.prepare()                     # arms into the carry (receive) pose
-            self.preflight_place()                          # read-only, before the tray is handed over
-            if a.selfscan:
-                logging.info("selfscan: %s", self.nav.selfscan())
-            cycle = os.environ.get("GENTO_CYCLE", "")
-            prefix = f"第 {cycle} 次：" if cycle and cycle != "1/1" else ""
-            if a.holding:
-                logging.info("--holding：托盘已在双爪中，不交接；再闭合一次（保持力矩），直接去放置点")
-                self.close_grippers()
-            elif not sys.stdin.isatty():
-                logging.info("无终端：不提示交接，按托盘已夹好出发")
-            else:
-                if a.handover:                              # drive to T first and open there
-                    if a.start:
-                        self.navigate(a.start)
-                    if start_pose != "prepare" and self.gripper is not None:
-                        self.sequence._gripper_action("open_before_receive", GripperAction.OPEN)
-                self.handover(f"{prefix}交接托盘（就在当前位置，双臂在运输位不动）。")
-            self.navigate(a.place)
-            self.place_and_back_to_carry()                  # forward, down, open, up, back -> carry pose
+                start_pose = self.arm_start(config)             # before any motion
+                if a.holding and start_pose == "prepare":
+                    raise MotionError("--holding：双臂必须已在运输（接盘）位且夹着托盘")
+                if start_pose in ("carry", "carry_wrist"):
+                    logging.info("双臂已在运输（接盘）位：%s，直接接入%s",
+                                 "只转腕部到新姿态" if start_pose == "carry_wrist" else "不动手臂",
+                                 "（夹着托盘，不张爪）" if a.holding else "")
+                    self.attach_at_carry(wrists=start_pose == "carry_wrist")
+                else:
+                    self.sequence.prepare()                     # arms into the carry (receive) pose
+                self.preflight_place()                          # read-only, before the tray is handed over
+                if a.selfscan:
+                    logging.info("selfscan: %s", self.nav.selfscan())
+                cycle = os.environ.get("GENTO_CYCLE", "")
+                prefix = f"第 {cycle} 次：" if cycle and cycle != "1/1" else ""
+                if a.holding:
+                    logging.info("--holding：托盘已在双爪中，不交接；再闭合一次（保持力矩），直接去放置点")
+                    self.close_grippers()
+                elif not sys.stdin.isatty():
+                    logging.info("无终端：不提示交接，按托盘已夹好出发")
+                else:
+                    if a.handover:                              # drive to T first and open there
+                        if a.start:
+                            self.navigate(a.start)
+                        if start_pose != "prepare" and self.gripper is not None:
+                            self.sequence._gripper_action("open_before_receive", GripperAction.OPEN)
+                    self.handover(f"{prefix}交接托盘（就在当前位置，双臂在运输位不动）。")
+                self.navigate(a.place)
+                self.place_and_back_to_carry()                  # forward, down, open, up, back -> carry pose
             if a.start and not a.no_return:
                 self.return_to_start()
             exit_code = 0
@@ -502,7 +588,8 @@ def main(argv=None):
     p.add_argument("--ssh-target", default="chassis")
     p.add_argument("--gripper-config", type=Path, default=ROOT / "config" / "gripper-can.json",
                    help="夹爪配置（与 skye_task run 相同）")
-    p.add_argument("--down-mm", type=float, help="本次放置下降距离 mm（默认用配置，当前 150）")
+    p.add_argument("--down-mm", type=float,
+                   help=f"本次放置下降距离 mm（默认 {PLACE_DOWN_MM:.0f}，篮子；配置文件里的 150 是托盘的）")
     p.add_argument("--up-mm", type=float, help="本次放置后上移距离 mm（默认等于下降距离）")
     p.add_argument("--place-lift-mm", type=float, default=PLACE_LIFT_MM,
                    help=f"放置时双臂下降后升降再下降的距离 mm（默认 {PLACE_LIFT_MM:.0f}；0 = 只在双臂够不到时补足）")
@@ -511,6 +598,8 @@ def main(argv=None):
     p.add_argument("--handover", action="store_true",
                    help="先导航到起始点 T、张爪，再交接（默认：在当前位置交接）")
     p.add_argument("--no-return", action="store_true", help="放置后不返回起始点")
+    p.add_argument("--finish-place", type=float, metavar="UP_MM",
+                   help="放置中途停在放置点（双臂已下降）后收尾：松爪 → 升降回原高度 → 双臂上移 UP_MM → 后移回运输位 → 回起始点")
     p.add_argument("--selfscan", action="store_true", help="准备完成后先测手臂／托盘占位（车前约 1 m 需无物体）")
     p.add_argument("--random-route", action="store_true",
                    help="另外在安全点附近随机偏移 0.08 m（途经点的随机选择本来就默认开启）")

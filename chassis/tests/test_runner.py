@@ -130,7 +130,7 @@ class RunnerTests(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
-    def run_trial(self, fail_on=None, extra=(), arms=None, nav_cls=None, answers=("", "1"), tty=True):
+    def run_trial(self, fail_on=None, extra=(), arms=None, nav_cls=None, answers=("", "1"), tty=True, lift=None):
         """`answers`: what the operator types, in order (handover: o / c / Enter; after placing: 1 / 0, r ...)."""
         typed = iter(answers)
         self.typed = typed
@@ -143,6 +143,8 @@ class RunnerTests(unittest.TestCase):
             d.close = lambda: None                                           # the real GentoSDK has close()
             for i, arm in enumerate(d.rt["arms"]):
                 arm["fb"]["fb_pos"] = list((arms or config.ready)[i])
+            if lift is not None:
+                d.rt["lift"]["fb_pos"] = [lift]
             return d
         with mock.patch.object(runner, "GentoSDK", side_effect=device), \
              mock.patch.object(runner, "GentoNavigation", side_effect=lambda **kw: (nav_cls or FakeNav)(fail_on=fail_on, **kw)), \
@@ -242,7 +244,7 @@ class RunnerTests(unittest.TestCase):
         self.assertNotIn(("start", "D"), FakeNav.log)                     # nothing moved
 
     def test_lift_lowers_the_tray_after_the_arms(self):
-        code, report = self.run_trial(extra=["--down-mm", "120"])
+        code, report = self.run_trial(extra=["--down-mm", "120", "--place-lift-mm", "50"])
         self.assertEqual(code, 0)
         plan = report["metadata"]["place_motion_mm"]
         self.assertEqual((plan["arm_down"], plan["lift_down"], plan["total_down"]), (120, 50, 170))
@@ -250,6 +252,14 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(lift["target_mm"], runner.load_config(self.cfg).receive_lift[0] - 50)
         code, report = self.run_trial(extra=["--down-mm", "120", "--place-lift-mm", "0"])
         self.assertEqual(report["metadata"]["place_motion_mm"]["lift_down"], 0)
+        self.assertFalse(any(s["name"] == "place_lift_down" for s in report["steps"]))
+
+    def test_basket_descent_by_default(self):
+        code, report = self.run_trial()
+        self.assertEqual(code, 0)
+        plan = report["metadata"]["place_motion_mm"]
+        self.assertEqual((plan["down"], plan["up"], plan["total_down"], plan["lift_down"]),
+                         (runner.PLACE_DOWN_MM, runner.PLACE_DOWN_MM, 135, 0))   # 5 cm less than the tray's 185
         self.assertFalse(any(s["name"] == "place_lift_down" for s in report["steps"]))
 
     def test_down_distance_can_be_set_for_one_run(self):
@@ -326,6 +336,49 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertNotIn("carry_wrists", [s["name"] for s in report["steps"]])
         self.assertNotIn(("start", "D"), FakeNav.log)
+
+    def interrupted_place_joints(self):
+        """Run a trial whose place stops at the lift step (like the basket pressing against the belt); return
+        the arm joints it stopped with (arms forward and down)."""
+        devices = []
+        orig_device = runner.GentoSDK
+
+        def failing_lift(seq, name, target):
+            raise runner.MotionError("升降调整期间双臂未保持静止")
+        with mock.patch.object(runner.Sequence, "_move_lift", failing_lift):
+            real = Device
+
+            def capture(config):
+                d = real(config); devices.append(d); return d
+            with mock.patch(__name__ + ".Device", side_effect=capture):
+                code, report, _ = self.with_grippers(extra=["--place-lift-mm", "50"])   # the tray's lift step
+        self.assertEqual(code, 1)
+        self.assertIn("未保持静止", report["error"])
+        self.arm_down = report["metadata"]["place_motion_mm"]["arm_down"]
+        return [list(arm["fb"]["fb_pos"]) for arm in devices[0].rt["arms"]]   # the sequence's link (created first)
+
+    def test_finish_an_interrupted_place_releases_retracts_and_returns(self):
+        down = self.interrupted_place_joints()
+        FakeNav.log = []
+        lowered = runner.load_config(self.cfg).receive_lift[0] - 33         # the lift stopped on its way down
+        code, report, events = self.with_grippers(arms=down, extra=["--finish-place", str(self.arm_down)],
+                                                  answers=(), lift=lowered)
+        self.assertEqual(code, 0)
+        self.assertEqual(report["status"], "completed")
+        self.assertEqual(events, [("grip", "open"), ("start", "undock"), ("start", "T")])   # released first
+        done = [s["name"] for s in report["steps"] if s.get("status") == "completed"]
+        self.assertLess(done.index("release"), done.index("place_lift_up"))
+        self.assertLess(done.index("place_lift_up"), done.index("up"))
+        self.assertLess(done.index("up"), done.index("back_to_carry"))
+        self.assertNotIn("forward", done)
+
+    def test_finish_place_is_refused_unless_it_ends_at_the_carry_pose(self):
+        down = self.interrupted_place_joints()
+        FakeNav.log = []
+        code, report, events = self.with_grippers(arms=down, extra=["--finish-place", "0"], answers=())
+        self.assertEqual(code, 1)
+        self.assertIn("只读规划不通过", report["error"])
+        self.assertEqual([e for e in events if e != ("grip", "freeze")], [])   # nothing opened, nothing driven
 
     def test_holding_requires_the_carry_pose(self):
         code, report = self.run_trial(extra=["--holding"])                  # arms at ready

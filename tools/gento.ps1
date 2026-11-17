@@ -32,6 +32,7 @@
 #   task [args]    START THE FULL TASK on the Orin (arms + navigation, in tmux)       (MOVES, asks y/n)
 #                  handover where it stands: Enter closes the grippers, 1 = held, go / 0 = not right (grippers open, put it right) -> D -> place -> T
 #                  --handover: drive to T first and open there, then the same handover
+#                  --finish-place 135: a place stopped at D with the arms down: release, retract, back to T
 #                  args e.g. --cycles 10 (10 runs in a row, stops at a failure) | --down-mm 120 | --no-return
 #                  --holding: tray still in the grippers after a stop: no opening, straight to D, place, back
 #                  --random-route: also a random spot near the safe points (waypoints are random by default)
