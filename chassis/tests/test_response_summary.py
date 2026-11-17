@@ -45,9 +45,17 @@ class ResponseSummaryTest(unittest.TestCase):
         res = RS.parse(OLD_LOG.splitlines(True))
         self.assertEqual([(r['job'], round(r['ms'])) for r in res], [('dock D', 114), ('undock', 59), ('dock T', 1698)])
         text = RS.summary(res)
-        self.assertIn('114 ms  →  合格', text)                              # the run: its first input / command
+        self.assertIn('114 ms  →  合格', text)                              # only the leg to D counts
         self.assertIn('20:39:42.235', text); self.assertIn('20:39:42.349', text)
-        self.assertIn('dock T       1698 ms  超时', text)
+        self.assertNotIn('1698', text)                                       # the later legs are not listed
+
+    def test_handover_drive_to_t_first_does_not_count(self):
+        head = '===== 2026-11-17 11:22:38 gento task 1/1:\n'
+        log = OLD_LOG.replace(head, head + '===== 20:30:00 timeout 650 python3 dock.py dock T --leave --closest\n'
+                              '[20:30:05.000    5.0s] INPUT ready: lidar snapshot 240000 points, 6 frames\n'
+                              '[20:30:07.000    7.0s] COMMAND accepted: move x 0.1 y 0.0 yaw 0.0 | input -> command 2000 ms\n')
+        text = RS.summary(RS.parse(log.splitlines(True)))
+        self.assertIn('114 ms  →  合格', text); self.assertNotIn('2000', text)
 
     def test_new_dock_log_line_round_trip_and_csv_appends(self):
         ns = load_dock(self.tmp)

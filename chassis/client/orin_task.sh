@@ -53,7 +53,8 @@ case "${1:-start}" in
       fi
       # response time (first lidar input -> first chassis command, < 1.2 s) on top, the complete run below;
       # runs/response_times.csv gets one line per run (appended, never overwritten)
-      python3 chassis/client/response_summary.py "$BODY" ${OFF:+--offset "$OFF"} --name "$(basename "$TLOG")" \
+      PLACE=D; prev=""; for a in "$@"; do [ "$prev" = --place ] && PLACE=$a; prev=$a; done   # the leg that counts
+      python3 chassis/client/response_summary.py "$BODY" --place "$PLACE" ${OFF:+--offset "$OFF"} --name "$(basename "$TLOG")" \
         --csv "$REPO/runs/response_times.csv" > "$TLOG.head" 2>&1
       cat "$TLOG.head"
       { cat "$TLOG.head"; echo; cat "$BODY"; } > "$TLOG" && rm -f "$TLOG.head" "$BODY"
