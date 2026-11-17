@@ -68,6 +68,10 @@ gento task-stop                     # 停止任务：双臂 + 底盘
   - `--holding`：托盘已在夹爪中，不提示交接，直接去 D；
   - `--handover`：先导航到 T、张爪，再按上面的方式交接；
   - `--no-return`：放完不回 T。
+- **响应时间指标（测评最重要的指标）**：定义为环境信息首次输入（首帧激光点云快照交给规划）到首次下发底盘运动指令，要求小于 1200 ms。
+  - 底盘每个作业都会写一行 `RESPONSE: first lidar input <epoch>（日期 时间）-> first chassis command <epoch>（日期 时间）= N ms OK/OVER`，同时追加到底盘的 `~/gento_dock/response_log.csv`（只追加，不覆盖）；
+  - 每次 `gento task` 的日志文件**最顶上**是本次运行的指标：两个时间戳都用底盘系统时间，同时换算成 Orin 时间，再给出间隔和是否合格，并列出每个底盘作业的数值；每次运行还会往 Orin 的 `~/gento_skye/runs/response_times.csv` 追加一行；
+  - 11-17 那次运行：整次 114 ms，合格；回 T 那一段作业 1698 ms，原因是采了一帧白用的点云：退回安全点只差 6 cm，这一步被跳过了。已修改：零距离的移动不再采点云。
 - **完整日志（11-17 起）**：每次 `gento task` 的终端完整输出另存为 Orin 上的 `~/gento_skye/runs/logs/task-日期-时间.log`（连续运行时每次一个 `…-c01.log`），窗口里最后一行会显示文件名。Orin 能免密登录底盘之后（`gento setup`），同一次运行的底盘日志 `run.log` 片段也会自动附在文件末尾；在此之前，底盘日志仍只在底盘的 `~/gento_dock/run.log` 里。
 - 结果：单次 `~/gento_skye/runs/with-navigation.json`；连续运行为 `runs/cycle-01.json …`，汇总在 `runs/cycles.log`。
 - 一次性设置（已完成第 1 条）：

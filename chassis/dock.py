@@ -84,8 +84,42 @@ def stamp(t=None):
     return time.strftime('%H:%M:%S', time.localtime(t)) + '.%03d' % int((t % 1.0) * 1000)
 
 
+RESP_FILE = os.path.join(HERE, 'response_log.csv')   # append-only: one line per job
+FIRST = {'scan': None, 'last_scan': None, 'input': None, 'done': False}   # response time of this job
+
+
+def full_stamp(t):
+    return time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(t)) + '.%03d' % int((t % 1.0) * 1000)
+
+
 def input_ready(what):
     INPUT_T[0] = time.time(); log('INPUT ready: %s' % what)
+    if what.startswith('lidar snapshot') and FIRST['input'] is None:          # first point cloud of this job
+        FIRST['input'], FIRST['scan'] = INPUT_T[0], FIRST['last_scan']
+
+
+def response_time(step):
+    """Evaluation metric: the first environment input (lidar point cloud) of this job -> the first chassis motion
+    command issued.  Required < PLAN_LIMIT_MS.  Logged once per job with both system timestamps (epoch and
+    local time) and appended to response_log.csv (never overwritten)."""
+    if FIRST['done'] or FIRST['input'] is None:
+        return
+    FIRST['done'] = True
+    t_in, t_cmd = FIRST['input'], time.time(); ms = 1000.0 * (t_cmd - t_in)
+    scan_ms = 1000.0 * (t_cmd - FIRST['scan']) if FIRST['scan'] else float('nan')
+    ok = 'OK' if ms < PLAN_LIMIT_MS else 'OVER'
+    log('RESPONSE: first lidar input %.3f (%s) -> first chassis command %.3f (%s) = %.0f ms (limit %d ms) %s | '
+        'command: %s | from the scan start %.0f ms' % (t_in, full_stamp(t_in), t_cmd, full_stamp(t_cmd), ms,
+                                                       PLAN_LIMIT_MS, ok, step, scan_ms))
+    try:
+        new = not os.path.exists(RESP_FILE)
+        with open(RESP_FILE, 'a') as fh:
+            if new:
+                fh.write('job,first_input_epoch,first_input_time,first_command_epoch,first_command_time,ms,result,command,scan_start_ms' + chr(10))
+            fh.write('%s,%.3f,%s,%.3f,%s,%.0f,%s,%s,%.0f' % (' '.join(sys.argv[1:3]), t_in, full_stamp(t_in), t_cmd,
+                                                            full_stamp(t_cmd), ms, ok, step.replace(',', ' '), scan_ms) + chr(10))
+    except OSError:
+        pass
 
 
 def plan_start(what):
@@ -119,6 +153,7 @@ def log(*a):
 
 
 def command_sent(step):
+    response_time(step)
     if CMD_INPUT_T[0] is not None:
         log('COMMAND accepted: %s | input -> command %.0f ms' % (step, _since(CMD_INPUT_T[0])))
 
@@ -152,7 +187,7 @@ def cloud(fresh=False):
     if not fresh and _CACHE['moves'] == MOVES[0] and time.time() - _CACHE['t'] < 2.0:
         return _CACHE['a']
     ready_to_move()
-    log('LIDAR scan start'); C.clear(); spin(0.15); C.clear(); t = time.time()
+    log('LIDAR scan start'); FIRST['last_scan'] = time.time(); C.clear(); spin(0.15); C.clear(); t = time.time()
     while len(C) < FRAMES and time.time() - t < 4:
         rclpy.spin_once(n, timeout_sec=0.05)
     a = np.concatenate([np.stack([s['x'], s['y'], s['z']], 1).astype(float)
@@ -808,6 +843,8 @@ def rel_target(pose_deg, settle=4.0):
 def translate(dx, dy):
     """Straight translation without turning by (dx, dy) in the robot frame: one diagonal move, or sideways then
     forward, or forward then sideways - the first whose swept volume is clear in the live cloud."""
+    if abs(dx) <= 0.005 and abs(dy) <= 0.005:
+        return            # nothing to move: no lidar snapshot (a needless one delayed the first command by 1.7 s)
     p = cloud()
     paths = [[(0.0, dy), (dx, 0.0)], [(dx, 0.0), (0.0, dy)]]     # pure moves only (see rel)
     for path in paths:

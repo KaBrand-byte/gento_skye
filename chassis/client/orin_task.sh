@@ -35,18 +35,28 @@ case "${1:-start}" in
       RES="$REPO/runs/with-navigation.json"; [ "$N" -gt 1 ] && RES="$REPO/runs/cycle-$(printf %02d "$i").json"
       # the complete output of every run goes to runs/logs/ (tee -i: Ctrl-C stops the task, not the log)
       TLOG="$LOGDIR/task-$STAMP.log"; [ "$N" -gt 1 ] && TLOG="$LOGDIR/task-$STAMP-c$(printf %02d "$i").log"
-      echo "===== $(date '+%F %T') gento task $i/$N: $*  (result $RES)" > "$TLOG"
+      BODY="$TLOG.part"                         # the run as it happens; the response time goes on top at the end
+      echo "===== $(date '+%F %T') gento task $i/$N: $*  (result $RES)" > "$BODY"
       L0=$(chlines)
       GENTO_CYCLE="$i/$N" stdbuf -oL -eL python3 -u chassis/client/run_task_with_navigation.py \
-        --config "${GENTO_TASK_CONFIG:-config/default.json}" --result "$RES" "$@" 2>&1 | tee -i -a "$TLOG"
+        --config "${GENTO_TASK_CONFIG:-config/default.json}" --result "$RES" "$@" 2>&1 | tee -i -a "$BODY"
       rc=${PIPESTATUS[0]}; [ $rc -eq 0 ] && ok=$((ok + 1))
-      echo "===== $(date '+%F %T') exit $rc" >> "$TLOG"
+      echo "===== $(date '+%F %T') exit $rc" >> "$BODY"
+      OFF=""
       if [ -n "$L0" ]; then                     # the chassis side of the same run (docking jobs, run.log)
         { echo "===== chassis ~/gento_dock/run.log from line $((L0 + 1))"
-          ssh -o BatchMode=yes -o ConnectTimeout=5 "$CH" "tail -n +$((L0 + 1)) ~/gento_dock/run.log"; } >> "$TLOG" 2>&1
+          ssh -o BatchMode=yes -o ConnectTimeout=5 "$CH" "tail -n +$((L0 + 1)) ~/gento_dock/run.log"; } >> "$BODY" 2>&1
+        T1=$(date +%s.%N); TC=$(ssh -o BatchMode=yes -o ConnectTimeout=5 "$CH" 'date +%s.%N' 2>/dev/null); T2=$(date +%s.%N)
+        [ -n "$TC" ] && OFF=$(python3 -c "print('%.3f' % (($T1 + $T2) / 2 - $TC))")     # Orin clock - chassis clock
       else
-        echo "(chassis log not included: no key login Orin -> chassis yet - 'gento setup' once)" | tee -a "$TLOG"
+        echo "(chassis log not included: no key login Orin -> chassis yet - 'gento setup' once)" | tee -a "$BODY"
       fi
+      # response time (first lidar input -> first chassis command, < 1.2 s) on top, the complete run below;
+      # runs/response_times.csv gets one line per run (appended, never overwritten)
+      python3 chassis/client/response_summary.py "$BODY" ${OFF:+--offset "$OFF"} --name "$(basename "$TLOG")" \
+        --csv "$REPO/runs/response_times.csv" > "$TLOG.head" 2>&1
+      cat "$TLOG.head"
+      { cat "$TLOG.head"; echo; cat "$BODY"; } > "$TLOG" && rm -f "$TLOG.head" "$BODY"
       echo "log: $TLOG"
       [ "$N" -gt 1 ] && echo "$(date '+%F %T') cycle $i/$N exit $rc  (ok $ok/$i)  $RES" | tee -a "$LOG"
       [ $rc -ne 0 ] && break                     # state unknown after a failure: stop the series
