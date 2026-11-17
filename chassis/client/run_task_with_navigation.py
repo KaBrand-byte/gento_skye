@@ -209,8 +209,7 @@ class Trial:
                         on_event=lambda name, detail: logging.info("%s%s %s", label, name, detail))
 
     def close_grippers(self):
-        """Handover at the start station: close both grippers now, so the tray is held while driving (his
-        start() closes them again at the place station, which is then a no-op)."""
+        """Close both grippers at handover and keep the command active during transport."""
         seq, gripper = self.sequence, self.gripper
         if gripper is None:
             return
@@ -220,6 +219,7 @@ class Trial:
         while time.monotonic() < until:
             seq.checked_feedback()
             time.sleep(seq.config.poll_seconds)
+        seq.result.metadata["gripper_handover"] = gripper.snapshot()
         logging.info("双爪已闭合，托盘已交接")
 
     def release_hardware(self):

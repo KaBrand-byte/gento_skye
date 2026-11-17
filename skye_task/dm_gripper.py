@@ -19,6 +19,9 @@ from .dm_protocol import (DISABLE, ENABLE, STATUS_NAMES, decode_feedback, encode
 from .sdk import MotionError
 
 
+CLOSE_HOLD_RAMP_SECONDS = 0.5
+
+
 @dataclass(frozen=True)
 class CANSide:
     interface: str = "vcan0"
@@ -28,6 +31,7 @@ class CANSide:
     close_direction: int = 1
     open_position_rad: Optional[float] = None
     close_position_rad: Optional[float] = None
+    hold_torque_nm: float = 0.0
 
     def validate(self):
         if not re.fullmatch(r"[a-zA-Z0-9_.-]{1,15}", self.interface):
@@ -38,6 +42,9 @@ class CANSide:
             raise ValueError("master_id 必须为 11 bit 标准 CAN ID")
         if type(self.close_direction) is not int or self.close_direction not in (-1, 1):
             raise ValueError("close_direction 必须为 +1 或 -1")
+        if (type(self.hold_torque_nm) not in (int, float)
+                or not 0 <= self.hold_torque_nm <= 10):
+            raise ValueError("hold_torque_nm 必须为 0..10 N·m 内的数值（协议编码范围）")
         for name in ("open_position_rad", "close_position_rad"):
             value = getattr(self, name)
             if value is not None and (type(value) not in (int, float) or not math.isfinite(value)):
@@ -201,6 +208,9 @@ class DMGripper:
         self.targets = {}
         self.commands = {}
         self.goal_serials = {}
+        self.ramp_hold_torque = False
+        self.hold_torque_fraction = 0.0
+        self.commanded_hold_torques = dict.fromkeys(self.sides, 0.0)
         self.error = None
         self.thread = None
         self.stop_event = threading.Event()
@@ -318,15 +328,23 @@ class DMGripper:
             interval = now - self.last_send
             self.max_command_interval_seconds = max(self.max_command_interval_seconds, interval)
             # A delayed scheduler must not turn a rate limit into a large target jump.
-            max_delta = self.config.slew_rate_rad_s * min(interval, 1 / self.config.control_rate_hz)
+            step_time = min(interval, 1 / self.config.control_rate_hz)
+            max_delta = self.config.slew_rate_rad_s * step_time
+            hold_fraction = self.hold_torque_fraction
+            if self.ramp_hold_torque:
+                hold_fraction = min(1.0, hold_fraction + step_time / CLOSE_HOLD_RAMP_SECONDS)
             for name in self.sides:
+                side = getattr(self.config, name)
+                torque = side.close_direction * side.hold_torque_nm * hold_fraction
                 delta = self.targets[name] - self.commands[name]
                 self.commands[name] += max(-max_delta, min(max_delta, delta))
                 self.transports[name].send(encode_mit(self.commands[name], kp=self.config.kp,
-                                                     kd=self.config.kd))
+                                                     kd=self.config.kd, torque_nm=torque))
+                self.commanded_hold_torques[name] = torque
                 self.send_count += 1
                 if abs(self.commands[name] - self.targets[name]) < 1e-9 and name not in self.goal_serials:
                     self.goal_serials[name] = self.serials[name]
+            self.hold_torque_fraction = hold_fraction
             self.last_send = now
 
     def _run(self):
@@ -365,6 +383,8 @@ class DMGripper:
         targets = self.config.validate_positions(targets, self.sides)
         if action is not None and action not in ("open", "close"):
             raise ValueError("夹爪动作必须为 open 或 close")
+        use_hold_torque = action == "close" and any(
+            getattr(self.config, name).hold_torque_nm > 0 for name in self.sides)
         checkpoint()
         if self.thread is None:
             raise MotionError("夹爪周期控制未启动")
@@ -377,6 +397,9 @@ class DMGripper:
                     if change * sign < -self.config.position_tolerance_rad:
                         raise MotionError(f"{name} 的 {action} 目标 {targets[name]:.6f} rad 与动作方向相反；"
                                           f"当前反馈 {self.feedback[name].position_rad:.6f} rad")
+            if not use_hold_torque or targets != self.targets:
+                self.ramp_hold_torque = False
+                self.hold_torque_fraction = 0.0
             self.targets = targets  # Validate both sides before changing either command.
             self.goal_serials.clear()
         deadline = self.clock() + self.config.motion_timeout_seconds
@@ -393,15 +416,17 @@ class DMGripper:
                     and abs(self.feedback[name].position_rad - targets[name]) <= self.config.position_tolerance_rad
                     and abs(self.feedback[name].velocity_rad_s) <= self.config.velocity_tolerance_rad_s
                     for name in self.sides)
-            if complete:
-                if stable_since is None:
-                    stable_since = now
-                    previous_serials = serials
-                if (now - stable_since >= self.config.stable_seconds
-                        and all(a != b for a, b in zip(serials, previous_serials))):
-                    return self.snapshot()
-            else:
-                stable_since = None
+                if complete:
+                    if stable_since is None:
+                        stable_since = now
+                        previous_serials = serials
+                    if (now - stable_since >= self.config.stable_seconds
+                            and all(a != b for a, b in zip(serials, previous_serials))):
+                        if not use_hold_torque or self.hold_torque_fraction >= 1.0:
+                            return self.snapshot()
+                        self.ramp_hold_torque = True
+                else:
+                    stable_since = None
             if now >= deadline:
                 with self.lock:
                     detail = "; ".join(
@@ -418,6 +443,7 @@ class DMGripper:
                                          "status_name": STATUS_NAMES.get(value.status, "未知状态")}
                                  for name, value in self.feedback.items()},
                     "targets_rad": dict(self.targets), "commands_rad": dict(self.commands),
+                    "commanded_hold_torque_nm": dict(self.commanded_hold_torques),
                     "mit_frames_sent": self.send_count,
                     "max_command_interval_seconds": self.max_command_interval_seconds}
 
@@ -426,6 +452,7 @@ class DMGripper:
         with self.lock:
             self.targets = dict(self.commands)
             self.goal_serials.clear()
+            self.ramp_hold_torque = False
 
     def disable(self):
         """Explicit operator action. Attempt both sides even when one send fails."""

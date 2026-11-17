@@ -15,7 +15,7 @@ from skye_task.gripper_cli import main as gripper_main
 
 def main(argv=None):
     parser = argparse.ArgumentParser(
-        description="独立夹爪绝对角度测试：正方向闭合，负方向张开；结束后失能，仅用于空载。")
+        description="独立夹爪台架测试：按绝对角度开合，闭合后按配置施加保持力矩，退出时失能卸力。")
     parser.add_argument("action", choices=("open", "close"), help="张开或闭合到指定绝对角度")
     parser.add_argument("--side", choices=("left", "right", "both"), default="left")
     parser.add_argument("--position-rad", type=float, required=True,
