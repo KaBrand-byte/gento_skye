@@ -1,0 +1,13 @@
+[Unit]
+Description=Skye VLA head and wrist observation cameras
+
+[Service]
+Type=simple
+ExecStart=/bin/bash %h/vla_pi05/run_camera.sh
+WorkingDirectory=%h/vla_pi05
+Restart=no
+KillSignal=SIGINT
+TimeoutStopSec=30
+
+[Install]
+WantedBy=default.target

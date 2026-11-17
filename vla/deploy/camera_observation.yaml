@@ -1,0 +1,22 @@
+# Temporary camera-only test override. Does not alter factory configuration.
+quad_csi_quickview:
+  ros__parameters:
+    camera:
+      head_right:
+        source: "none"
+    mosaic:
+      fps: 30
+      output_width: 1280
+      output_height: 720
+    diagnostics:
+      capture_fps_log_interval_s: 2.0
+    recovery:
+      argus_restart_enabled: false
+      container_max_restarts: 1
+    webrtc:
+      publish_h264: false
+    mjpeg:
+      publish: true
+      output_width: 1280
+      output_height: 720
+      quality: 70

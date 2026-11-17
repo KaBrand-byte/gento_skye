@@ -1,0 +1,12 @@
+[Unit]
+Description=Skye VLA observation inference (DROID diagnostics, no robot execution)
+
+[Service]
+Type=simple
+ExecStart=/bin/bash %h/vla_pi05/run_policy.sh --host 6.6.7.99 --port 8000 --diagnostic-left-gripper-rad 0.0
+WorkingDirectory=%h/vla_pi05
+Restart=no
+TimeoutStopSec=30
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,99 @@
+quad_csi_quickview:
+  ros__parameters:
+    camera_profiles:
+      s56: /opt/kernelmind/apex/install/gmsl_quadcam/share/gmsl_quadcam/config/camera_profiles/s56.yaml
+      sh5: /opt/kernelmind/apex/install/gmsl_quadcam/share/gmsl_quadcam/config/camera_profiles/sh5.yaml
+      sh3: /opt/kernelmind/apex/install/gmsl_quadcam/share/gmsl_quadcam/config/camera_profiles/sh3.yaml
+      d405: /opt/kernelmind/apex/install/gmsl_quadcam/share/gmsl_quadcam/config/camera_profiles/d405.yaml
+    camera:
+      head_depth: false
+      shared_argus_pipeline: false
+      head_left:
+        profile: sh5
+        source: csi://0
+        flip_method: false
+        h264_output_width: 1280
+        h264_output_height: 720
+      head_right:
+        profile: sh5
+        source: none
+        flip_method: false
+        h264_output_width: 1280
+        h264_output_height: 720
+      wrist_left:
+        profile: sh5
+        source: csi://4
+        flip_method: true
+        h264_output_width: 1280
+        h264_output_height: 720
+      wrist_right:
+        profile: sh5
+        source: csi://5
+        flip_method: true
+        h264_output_width: 1280
+        h264_output_height: 720
+    mosaic:
+      fps: 30
+      output_width: 1280
+      output_height: 720
+      show_timestamp: false
+    recovery:
+      max_attempts: 2
+      operation_timeout_s: 30.0
+      low_fps_ratio: 0.5
+      low_fps_window_s: 10.0
+      exit_container_on_failure: true
+      container_restart_delay_s: 5.0
+      container_max_restarts: 1
+      container_restart_window_s: 300.0
+      container_backoff_multiplier: 2.0
+      container_max_restart_delay_s: 30.0
+      argus_restart_enabled: false
+      argus_restart_after_container_failures: 1
+      argus_restart_max_attempts: 1
+      argus_restart_timeout_s: 20.0
+      argus_restart_settle_s: 3.0
+      argus_restart_command:
+      - /usr/bin/sudo
+      - -n
+      - /usr/bin/systemctl
+      - restart
+      - nvargus-daemon.service
+    diagnostics:
+      capture_fps_log_interval_s: 2.0
+    outputs:
+      camera_stream_codec: h264
+      publish_only_with_subscribers: true
+      mjpeg_quality: 55
+      publish_h264_undistorted: false
+      h264_bitrate: 8000000
+      h264_gop: 30
+      publish_raw_nv12: false
+      publish_undistorted_nv12: false
+      publish_depth_raw: false
+    webrtc:
+      gop: 60
+      output_width: 1920
+      output_height: 1488
+      bitrate: 8242880
+      min_bitrate: 2000000
+      max_bitrate: 12000000
+      publish_h264: false
+      signal_url: ws://127.0.0.1:8554
+      room_ids:
+      - '10'
+      - '11'
+      - '12'
+    mjpeg:
+      publish: true
+      output_width: 1280
+      output_height: 720
+      quality: 70
+    recorder:
+      directory: /media/marvin/BAG_STORAGE/recorded_bags
+      output_width: 1920
+      output_height: 1080
+      bitrate: 20000000
+      gop: 60
+      max_bagfile_size: 2147483648
+      max_bagfile_duration: 600
