@@ -30,10 +30,12 @@
 #   undock                DRIVE: reverse straight out along the last docking approach              (asks y/n)
 #   job        job status JSON (what the skye_task adapter reads)
 #   task [args]    START THE FULL TASK on the Orin (arms + navigation, in tmux)       (MOVES, asks y/n)
-#                  T -> Enter -> D -> place -> reverse out -> arms to carry pose -> back to T
+#                  handover where it stands: Enter closes the grippers, 1 = held, go / 0 = not right (grippers open, put it right) -> D -> place -> T
+#                  --handover: drive to T first and open there, then the same handover
 #                  args e.g. --cycles 10 (10 runs in a row, stops at a failure) | --down-mm 120 | --no-return
 #                  --holding: tray still in the grippers after a stop: no opening, straight to D, place, back
 #                  --random-route: also a random spot near the safe points (waypoints are random by default)
+#   grip open|close [left|right]   only the grippers, arms do not move (not while a task runs: o / c there)
 #   task-attach    re-attach to the running task (after a Wi-Fi drop); Ctrl-b d detaches, task keeps running
 #   task-stop      Ctrl-C to the task (stops arms + chassis) and software-stop the chassis
 #   task-check     no motion: task config + SDK version on the Orin
@@ -81,8 +83,10 @@ switch ($Cmd) {
     'undock'   { Confirm-Motion "reverse straight out of the last docking"; ssh -t chassis "$remote undock && $remote follow" }
     'teach'    { Confirm-Motion "teach station $Arg at the current lateral position (turns a little)"; ssh chassis "$remote teach $Arg" }
     'job'      { ssh chassis "$remote job-status" }
-    'task'        { Confirm-Motion "FULL TASK on the Orin: arms to carry pose, drive to T, Enter, drive to D, place, back to T";
+    'task'        { Confirm-Motion "FULL TASK on the Orin: arms to carry pose, handover here (Enter closes, 1 = go, 0 = open again), drive to D, place, back to T";
                     ssh -t orin "bash ~/gento_skye/chassis/client/orin_task.sh start $Arg $($Rest -join ' ')" }
+    'grip'        { if ($Arg -notin 'open', 'close') { Write-Host "usage: .\gento.ps1 grip open|close [left|right]"; exit 1 }
+                    ssh -t orin "bash ~/gento_skye/chassis/client/orin_task.sh grip $Arg $($Rest -join ' ')" }
     'task-attach' { ssh -t orin "bash ~/gento_skye/chassis/client/orin_task.sh attach" }
     'task-stop'   { ssh orin "bash ~/gento_skye/chassis/client/orin_task.sh stop" }
     'task-check'  { ssh orin "bash ~/gento_skye/chassis/client/orin_task.sh check" }
@@ -109,5 +113,5 @@ switch ($Cmd) {
         }
         Start-Process 'chrome.exe' 'http://localhost:8080'
     }
-    default    { Get-Content $PSCommandPath -TotalCount 39 | Select-Object -Skip 1 }
+    default    { Get-Content $PSCommandPath -TotalCount 48 | Select-Object -Skip 1 }
 }

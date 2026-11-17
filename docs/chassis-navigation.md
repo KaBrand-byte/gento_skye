@@ -141,14 +141,16 @@ bash ~/gento_skye/chassis/client/orin_task.sh stop             # 软件停止：
 完整任务的顺序（`chassis/client/run_task_with_navigation.py`，不修改 `skye_task`）：
 1. 读取双臂位置：已在接盘（运输）位则只连接、上使能，不动手臂；在准备位或过渡位则执行 `skye_task` 的 `prepare()`；其他姿态拒绝启动（`prepare()` 会直接回准备位，曾导致双臂相撞）。
 2. 只读规划整个放置动作（前伸、下降、上移、后移）；下降超出双臂可达范围时，双臂下降到留 10 mm 余量的位置，其余由升降完成（当前：双臂 135 + 升降 15 = 150 mm）；不可行则在交接前停止。
-3. 导航到 T；到 T 后才张爪，响铃提示递盘；按 Enter 后双爪闭合。
+3. 原地交接（不导航，车通常已停在 T，双臂不动）：响铃提示，把托盘放到双爪之间，按 Enter 闭合；再输入反馈 `1` 夹好了、出发，`0` 没夹好、夹爪张开，放正后再按 Enter 闭合并再问一次。任何时候可用 `o` / `c` 手动张开 / 闭合；事先已夹好的直接输入 `1`。无终端时不提示。`--handover`：先导航到 T 并张爪，再同样交接。
 4. 导航到 D。
 5. 放置：前伸 → 双臂下降（+ 升降补足）→ 松爪 → 升降回升 → 双臂上移 → 后移前伸的距离，直接回到接盘位。
 6. 沿进入路线后退，导航回 T，等待下一个托盘。
 
-参数：`--down-mm`、`--up-mm`（仅本次）、`--holding`（托盘已在夹爪中：跳过 T 和交接）、`--no-return`、`--cycles N`（连续 N 次，失败即停）。
+参数：`--down-mm`、`--up-mm`（仅本次）、`--holding`（托盘已在夹爪中：不提示交接）、`--handover`（先去 T 再交接）、`--no-return`、`--cycles N`（连续 N 次，失败即停）。
 
 结果写在 `~/gento_skye/runs/with-navigation.json`。
+
+只开合夹爪（双臂不动，任务未运行时）：`gento grip open|close [left|right]`（即 `orin_task.sh grip ...`，调用 `python3 -m skye_task gripper ... --transport sdk`，退出时不失能，保持当前状态）。
 
 注意：
 - 运行前确认 Apex 遥操作没有在控制手臂；目前只有 `apex-backend` 在运行。

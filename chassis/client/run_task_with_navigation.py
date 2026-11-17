@@ -4,13 +4,16 @@ Order (run from the repository root on the machine that runs skye_task, ROS env 
   1. skye_task Sequence.prepare()      arms -> ready -> grippers open -> transition -> receive/carry pose
                                        (lift heights from the config)
   2. [--selfscan]                      lidar measures arms (+tray) on the chassis (needs ~1 m free in front)
-  3. navigate to the start station     (default T, the handover point)            <- chassis moves
-  4. handover                          press Enter: the grippers close (and stay checked while driving)
-  5. navigate to the place station     (default D, the conveyor)                  <- chassis moves
-  6. place                            skye_task's own motion steps: forward, down, open, up, and back by the
+  3. handover, decoupled from driving  where the robot stands (normally at T), arms not moving: the tray is
+                                       put between the grippers, Enter closes them, then the operator answers
+                                       1 = held right, go;  0 = not right: the grippers open, put it right,
+                                       Enter closes again.  o / c open / close by hand at any time.
+                                       (--holding: no prompt; --handover: drive to T and open first)
+  4. navigate to the place station     (default D, the conveyor)                  <- chassis moves
+  5. place                            skye_task's own motion steps: forward, down, open, up, and back by the
                                        forward distance - i.e. straight back into the carry pose (no detour
                                        over transition / ready, no second prepare)
-  7. return (unless --no-return)       reverse straight out of the place station, turn, dock at the start
+  6. return (unless --no-return)       reverse straight out of the place station, turn, dock at the start
                                        station again: arms in the carry pose, grippers open - ready for the
                                        next tray.  A new run started like this does not move the arms at all.
 
@@ -29,6 +32,7 @@ from datetime import datetime, timezone
 import logging
 import os
 from pathlib import Path
+import select
 import signal
 import sys
 import time
@@ -50,7 +54,27 @@ from skye_task.config import load_config  # noqa: E402
 from skye_task.geometry import local_displacement, translated  # noqa: E402
 from skye_task.interfaces import GripperAction, GripperTarget  # noqa: E402
 from skye_task.sdk import GentoSDK, MotionError  # noqa: E402
-from skye_task.sequence import FIXED_AXES, Result, Sequence  # noqa: E402
+from skye_task.sequence import FIXED_AXES, Result, Sequence, Stopped  # noqa: E402
+
+
+def read_answer(sequence):
+    """One typed line (stripped, lower case); the arm / lift / gripper feedback stays checked while waiting."""
+    while True:
+        sequence.checked_feedback()
+        readable, _, _ = select.select([sys.stdin], [], [], sequence.config.poll_seconds)
+        if readable:
+            line = sys.stdin.readline()
+            if not line:
+                raise Stopped("标准输入关闭")
+            return line.strip().lower()
+
+
+def banner(*lines):
+    bar = "=" * 60
+    print(chr(7)); print(bar)                               # terminal bell
+    for line in lines:
+        print(f"  {line}")
+    print(bar, flush=True)
 
 
 class Trial:
@@ -234,6 +258,49 @@ class Trial:
             time.sleep(seq.config.poll_seconds)
         logging.info("双爪已闭合，托盘已交接")
 
+    def grip(self, action):
+        """Manual gripper action ("o" / "c") at the current arm pose; the arms do not move."""
+        if action == "c":
+            self.close_grippers()
+        else:
+            self.sequence._gripper_action("manual_open", GripperAction.OPEN)
+            logging.info("双爪已张开")
+
+    def handover(self, title):
+        """The tray is put between the grippers, Enter (or c) closes them; then the operator answers 1 = held
+        right, go - or 0 = not right: the grippers open again, the tray is put right, Enter closes again.
+        o / c open / close by hand at any time (arms do not move); 1 also takes a tray closed before the run
+        (gento grip close)."""
+        place = self.args.place
+        log = self.sequence.result.metadata.setdefault("handover_feedback", [])
+        if self.gripper is None:
+            banner(title, f"按 Enter 出发去 {place}；Ctrl-C 停止。")
+            while read_answer(self.sequence) not in ("", "1"):
+                pass
+            return
+        closed = False
+        while True:
+            if closed:
+                banner("夹好了吗？", f"1 = 夹好了，出发去 {place}   0 = 没夹好（张开夹爪，重新放）   o / c = 张开 / 闭合",
+                       "Ctrl-C 停止。")
+            else:
+                banner(title, "把托盘放到双爪之间，按 Enter 闭合夹爪。",
+                       f"Enter / c = 闭合   o = 张开   1 = 已经夹好（比如事先 gento grip close），出发去 {place}",
+                       "Ctrl-C 停止。")
+            while True:
+                answer = read_answer(self.sequence)
+                if answer == "c" or (answer == "" and not closed):
+                    self.grip("c"); closed = True; log.append("close")
+                elif answer in ("o", "0"):
+                    self.grip("o"); closed = False; log.append(answer)
+                elif answer == "1":
+                    log.append("1"); logging.info("交接反馈 1：托盘已夹好")
+                    return
+                else:
+                    print("  请输入：" + ("1 / 0 / o / c" if closed else "Enter / c / o / 1"), flush=True)
+                    continue
+                break
+
     def release_hardware(self):
         """Gripper worker first, then the arm SDK link (same order as skye_task's run)."""
         gripper, sdk, self.gripper, self._sdk = self.gripper, self._sdk, None, None
@@ -351,22 +418,19 @@ class Trial:
             self.preflight_place()                          # read-only, before the tray is handed over
             if a.selfscan:
                 logging.info("selfscan: %s", self.nav.selfscan())
+            cycle = os.environ.get("GENTO_CYCLE", "")
+            prefix = f"第 {cycle} 次：" if cycle and cycle != "1/1" else ""
             if a.holding:
-                logging.info("--holding：托盘已在双爪中，跳过起始点和交接，直接去放置点")
+                logging.info("--holding：托盘已在双爪中，不交接，直接去放置点")
+            elif not sys.stdin.isatty():
+                logging.info("无终端：不提示交接，按托盘已夹好出发")
             else:
-                if a.start:
-                    self.navigate(a.start)
-                if start_pose == "carry" and self.gripper is not None:
-                    self.sequence._gripper_action("open_before_receive", GripperAction.OPEN)   # only now, at T
-                cycle = os.environ.get("GENTO_CYCLE", "")
-                prefix = f"第 {cycle} 次：" if cycle and cycle != "1/1" else ""
-                bar = "=" * 60
-                print(chr(7))                                       # terminal bell
-                print(bar)
-                print(f"  {prefix}机器人已到 T。请递篮子，放好后按 Enter（双爪闭合，出发去放置点）；Ctrl-C 停止。")
-                print(bar, flush=True)
-                wait_for_start(self.sequence)
-                self.close_grippers()
+                if a.handover:                              # drive to T first and open there
+                    if a.start:
+                        self.navigate(a.start)
+                    if start_pose == "carry" and self.gripper is not None:
+                        self.sequence._gripper_action("open_before_receive", GripperAction.OPEN)
+                self.handover(f"{prefix}交接托盘（就在当前位置，双臂在运输位不动）。")
             self.navigate(a.place)
             self.place_and_back_to_carry()                  # forward, down, open, up, back -> carry pose
             if a.start and not a.no_return:
@@ -423,7 +487,9 @@ def main(argv=None):
     p.add_argument("--place-lift-mm", type=float, default=PLACE_LIFT_MM,
                    help=f"放置时双臂下降后升降再下降的距离 mm（默认 {PLACE_LIFT_MM:.0f}；0 = 只在双臂够不到时补足）")
     p.add_argument("--holding", action="store_true",
-                   help="托盘已在双爪中（例如中途停止后）：不张爪、跳过起始点和交接，直接去放置点")
+                   help="托盘已在双爪中：不张爪、不提示交接，直接去放置点")
+    p.add_argument("--handover", action="store_true",
+                   help="先导航到起始点 T、张爪，再交接（默认：在当前位置交接）")
     p.add_argument("--no-return", action="store_true", help="放置后不返回起始点")
     p.add_argument("--selfscan", action="store_true", help="准备完成后先测手臂／托盘占位（车前约 1 m 需无物体）")
     p.add_argument("--random-route", action="store_true",

@@ -130,7 +130,14 @@ class RunnerTests(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
-    def run_trial(self, fail_on=None, extra=(), arms=None, nav_cls=None):
+    def run_trial(self, fail_on=None, extra=(), arms=None, nav_cls=None, answers=("", "1"), tty=True):
+        """`answers`: what the operator types, in order (handover: o / c / Enter; after placing: 1 / 0, r ...)."""
+        typed = iter(answers)
+        self.typed = typed
+
+        def read_answer(seq):
+            seq.checked_feedback()
+            return next(typed)
         def device(config):
             d = Device(config)
             d.close = lambda: None                                           # the real GentoSDK has close()
@@ -139,7 +146,7 @@ class RunnerTests(unittest.TestCase):
             return d
         with mock.patch.object(runner, "GentoSDK", side_effect=device), \
              mock.patch.object(runner, "GentoNavigation", side_effect=lambda **kw: (nav_cls or FakeNav)(fail_on=fail_on, **kw)), \
-             mock.patch.object(runner, "wait_for_start", lambda seq: None):
+             mock.patch.object(runner, "wait_for_start", lambda seq: None),              mock.patch.object(runner, "read_answer", read_answer),              mock.patch.object(runner.sys.stdin, "isatty", lambda: tty):
             code = runner.main(["--config", str(self.cfg), "--result", str(self.result), "--poll", "0.01",
                                 "--place-gap", "0.3", *extra])
         return code, json.loads(self.result.read_text(encoding="utf-8"))
@@ -149,18 +156,66 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(report["status"], "completed")
         self.assertEqual(report["navigation"], "arrived")
-        self.assertEqual([l["destination"] for l in report["metadata"]["navigation_legs"]], ["T", "D", "undock", "T"])
-        self.assertEqual(FakeNav.log, [("init", {"D": 0.3}), ("selfscan",), ("start", "T"), ("start", "D"),
+        # the handover happens where the robot stands (T): no driving to T first, straight to D
+        self.assertEqual([l["destination"] for l in report["metadata"]["navigation_legs"]], ["D", "undock", "T"])
+        self.assertEqual(FakeNav.log, [("init", {"D": 0.3}), ("selfscan",), ("start", "D"),
                                        ("start", "undock"), ("start", "T")])
         names = [s["name"] for s in report["steps"]]
         self.assertLess(names.index("receive_lift"), names.index("forward"))   # carry pose held while driving
         self.assertEqual(names[-2:], ["back_to_carry", "finished"])   # straight back into the carry pose, then drive
 
-    def test_grippers_close_at_the_start_station_before_driving_to_the_place_station(self):
+    def with_grippers(self, **kw):
+        from skye_task.config import load_config
+        data = json.loads(self.cfg.read_text()); data["gripper_enabled"] = True
+        self.cfg.write_text(json.dumps(data))
+        kw.setdefault("arms", load_config(self.cfg).receive)
+        with mock.patch.object(runner.Trial, "make_sequence", make_sequence_with_fake_gripper):
+            code, report = self.run_trial(**kw)
+        return code, report, [e for e in FakeNav.log if e[0] in ("grip", "start")]
+
+    def test_handover_enter_closes_and_1_goes(self):
+        code, report, events = self.with_grippers(answers=("", "1"))
+        self.assertEqual(code, 0)
+        self.assertEqual(report["status"], "completed")
+        self.assertEqual(events, [("grip", "close"), ("start", "D"), ("grip", "open"), ("start", "undock"),
+                                  ("start", "T")])
+        self.assertEqual(report["metadata"]["handover_feedback"], ["close", "1"])
+        self.assertNotIn("ready", [s["name"] for s in report["steps"]])       # arms not moved for the handover
+
+    def test_handover_0_opens_the_grippers_to_put_the_tray_right(self):
+        # 0: not held right -> grippers open; Enter closes again; a stray Enter while closed does nothing; 1 goes
+        code, report, events = self.with_grippers(answers=("", "0", "", "", "1"))
+        self.assertEqual(code, 0)
+        self.assertEqual(report["metadata"]["handover_feedback"], ["close", "0", "close", "1"])
+        self.assertEqual(events, [("grip", "close"), ("grip", "open"), ("grip", "close"), ("start", "D"),
+                                  ("grip", "open"), ("start", "undock"), ("start", "T")])
+        self.assertEqual(list(self.typed), [])                             # every answer was read
+        done = [s["name"] for s in report["steps"] if s.get("status") == "completed"]
+        self.assertEqual(done.count("forward"), 1)                         # placing at D is unchanged: once
+
+    def test_handover_manual_keys_and_a_tray_closed_before_the_run(self):
+        code, report, events = self.with_grippers(answers=("o", "c", "1"))
+        self.assertEqual(events[:3], [("grip", "open"), ("grip", "close"), ("start", "D")])
+        FakeNav.log = []
+        code, report, events = self.with_grippers(answers=("1",))           # gento grip close done before
+        self.assertEqual(code, 0)
+        self.assertEqual(events[0], ("start", "D"))
+
+    def test_stop_during_the_handover_does_not_drive(self):
+        code, report, events = self.with_grippers(answers=("", "0"))     # then Ctrl-C (no more input)
+        self.assertNotEqual(code, 0)
+        self.assertNotIn(("start", "D"), FakeNav.log)
+
+    def test_no_terminal_asks_nothing(self):
+        code, report = self.run_trial(answers=(), tty=False)
+        self.assertEqual(code, 0)
+        self.assertNotIn("handover_feedback", report["metadata"])
+
+    def test_handover_option_drives_to_the_start_station_first(self):
         data = json.loads(self.cfg.read_text()); data["gripper_enabled"] = True
         self.cfg.write_text(json.dumps(data))
         with mock.patch.object(runner.Trial, "make_sequence", make_sequence_with_fake_gripper):
-            code, report = self.run_trial()
+            code, report = self.run_trial(extra=["--handover"])
         self.assertEqual(code, 0)
         self.assertEqual(report["status"], "completed")
         events = [e for e in FakeNav.log if e[0] in ("grip", "start")]
@@ -179,12 +234,12 @@ class RunnerTests(unittest.TestCase):
         names = [s["name"] for s in report["steps"]]
         self.assertNotIn("ready", names)
         self.assertNotIn("receive", names)
-        self.assertEqual(FakeNav.log[1:3], [("start", "T"), ("start", "D")])
+        self.assertEqual(FakeNav.log[1:3], [("start", "D"), ("start", "undock")])
 
     def test_refuses_to_start_with_the_arms_somewhere_else(self):
         code, report = self.run_trial(arms=[[10.0] * 7, [-10.0] * 7])
         self.assertEqual(code, 1)
-        self.assertNotIn(("start", "T"), FakeNav.log)                     # nothing moved
+        self.assertNotIn(("start", "D"), FakeNav.log)                     # nothing moved
 
     def test_lift_lowers_the_tray_after_the_arms(self):
         code, report = self.run_trial(extra=["--down-mm", "120"])
@@ -233,7 +288,7 @@ class RunnerTests(unittest.TestCase):
         self.cfg.write_text(json.dumps(data))
         receive = load_config(self.cfg).receive
         with mock.patch.object(runner.Trial, "make_sequence", make_sequence_with_fake_gripper):
-            code, report = self.run_trial(arms=receive)
+            code, report = self.run_trial(arms=receive, extra=["--handover"])
         self.assertEqual(code, 0)
         events = [e for e in FakeNav.log if e[0] in ("grip", "start")]
         self.assertEqual(events[:3], [("start", "T"), ("grip", "open"), ("grip", "close")])
@@ -268,7 +323,7 @@ class RunnerTests(unittest.TestCase):
     def test_no_return(self):
         code, report = self.run_trial(extra=["--no-return"])
         self.assertEqual(code, 0)
-        self.assertEqual([l["destination"] for l in report["metadata"]["navigation_legs"]], ["T", "D"])
+        self.assertEqual([l["destination"] for l in report["metadata"]["navigation_legs"]], ["D"])
 
     def test_failure_on_the_way_back_keeps_the_placement_result(self):
         code, report = self.run_trial(fail_on="undock")
@@ -278,15 +333,13 @@ class RunnerTests(unittest.TestCase):
         self.assertIn(("stop", "undock"), FakeNav.log)
 
     def test_blocked_docking_is_retried_after_enter_on_a_terminal(self):
-        with mock.patch.object(runner.sys.stdin, "isatty", lambda: True):
-            code, report = self.run_trial(nav_cls=BlockedOnceNav)
+        code, report = self.run_trial(nav_cls=BlockedOnceNav)
         self.assertEqual(code, 0)
         self.assertEqual([e for e in FakeNav.log if e[0] == "start"],
-                         [("start", "T"), ("start", "D"), ("start", "D"), ("start", "undock"), ("start", "T")])
+                         [("start", "D"), ("start", "D"), ("start", "undock"), ("start", "T")])
 
     def test_blocked_docking_without_a_terminal_fails(self):
-        with mock.patch.object(runner.sys.stdin, "isatty", lambda: False):
-            code, report = self.run_trial(nav_cls=BlockedOnceNav)
+        code, report = self.run_trial(nav_cls=BlockedOnceNav, tty=False)
         self.assertEqual(code, 1)
 
     def test_failure_at_the_place_station_stops_chassis_and_arms_without_placing(self):

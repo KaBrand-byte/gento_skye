@@ -6,6 +6,8 @@
 #   bash orin_task.sh attach                re-attach (e.g. after a Wi-Fi drop); Ctrl-b d detaches again
 #   bash orin_task.sh stop                  Ctrl-C to the task (stops arms + chassis) and software-stop the chassis
 #   bash orin_task.sh check                 no motion: config check and SDK version
+#   bash orin_task.sh grip open|close [left|right]   only the grippers (arms do not move); not while a task
+#                                           runs - in the task window use o / c instead.  Stays as it is after exit.
 #
 # Runner args, e.g.:  --selfscan   --start ''   --place D --place-gap 0.30
 # Environment (override before calling): GENTO_SDK_ROOT, GENTO_TASK_CONFIG, CYCLONEDDS_URI
@@ -57,6 +59,14 @@ case "${1:-start}" in
 import sys, time; sys.path.insert(0, 'chassis/client')
 from gento_navigation import GentoNavigation
 n = GentoNavigation(); time.sleep(1); n.stop(); print('chassis stopped'); n.close()" ;;
+  grip)       # skye_task's own gripper tool over the arm SDK link; no --disable-on-exit: it keeps holding
+    case "$2" in open|close) ;; *) echo "usage: orin_task.sh grip open|close [left|right]"; exit 1 ;; esac
+    if pgrep -f "^python3 chassis/client/run_task_with_navigation.py" >/dev/null; then
+      echo "a task is running: use o / c in the task window (gento task-attach)"; exit 1
+    fi
+    env_setup
+    python3 -m skye_task gripper "$2" --transport sdk --robot-config "${GENTO_TASK_CONFIG:-config/default.json}" \
+      --config config/gripper-can.json --side "${3:-both}" --hold-seconds 1 --brief --result runs/gripper-manual.json ;;
   check)
     env_setup
     python3 -m skye_task check --config "${GENTO_TASK_CONFIG:-config/default.json}" > /dev/null && echo "config ok"

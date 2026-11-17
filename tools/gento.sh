@@ -26,8 +26,10 @@
 #   job        job status JSON
 #   stop       software stop: kill job, cancel moves + tasks, soft manual
 #   log        follow the job log (Ctrl+C to leave; the job keeps running)
+#   grip open|close [left|right]   only the grippers, arms do not move (not while a task runs: o / c there)
 #   task [args]    START THE FULL TASK (arms + navigation) in tmux on the Orin           (asks y/n)
-#                  args e.g. --cycles 10 | --down-mm 120 | --holding | --no-return | --start ''
+#                  handover where it stands: Enter closes the grippers, 1 = held, go / 0 = not right (grippers open, put it right) -> D -> place -> T
+#                  args e.g. --cycles 10 | --down-mm 120 | --holding | --no-return | --handover (drive to T first)
 #                  --random-route: also a random spot near the safe points (waypoints are random by default)
 #   task-attach    show the running task again (Ctrl-b d detaches; the task keeps running)
 #   task-stop      stop the task (arms + chassis) and software-stop the chassis
@@ -80,7 +82,9 @@ case "$cmd" in
               confirm "line up in front of station $1 (not driving in)"; ch_t "lineup$(quote "$1")" ;;
   undock)     confirm "reverse straight out of the last docking"; ch_t undock ;;
   log)        ssh -t "$CHASSIS" "$REMOTE log" ;;
-  task)       confirm "FULL TASK: arms to the carry pose, T, Enter, D, place, back to T"; orin "start$(quote "$@")" ;;
+  task)       confirm "FULL TASK: arms to the carry pose, handover here (Enter closes, 1 = go, 0 = open again), D, place, back to T"; orin "start$(quote "$@")" ;;
+  grip)       case "$1" in open|close) ;; *) echo "usage: gento grip open|close [left|right]"; exit 1 ;; esac
+              orin "grip$(quote "$@")" ;;
   task-attach) orin attach ;;
   task-stop)  orin stop ;;
   task-check) orin check ;;
@@ -95,5 +99,5 @@ case "$cmd" in
   setup)      [ $ON_ORIN = 1 ] || { echo "run 'gento setup' on the Orin"; exit 1; }
               [ -f ~/.ssh/id_ed25519 ] || ssh-keygen -t ed25519 -N "" -f ~/.ssh/id_ed25519
               ssh-copy-id -o ConnectTimeout=10 sunrise@6.6.7.6 && ssh -o BatchMode=yes sunrise@6.6.7.6 echo "chassis login OK" ;;
-  *)          sed -n '2,40p' "$0" ;;
+  *)          sed -n '2,44p' "$0" ;;
 esac
