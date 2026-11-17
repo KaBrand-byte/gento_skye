@@ -199,7 +199,7 @@ class RunnerTests(unittest.TestCase):
         FakeNav.log = []
         code, report, events = self.with_grippers(answers=("1",))           # gento grip close done before
         self.assertEqual(code, 0)
-        self.assertEqual(events[0], ("start", "D"))
+        self.assertEqual(events[:2], [("grip", "close"), ("start", "D")])   # closed again: hold torque on the way
 
     def test_stop_during_the_handover_does_not_drive(self):
         code, report, events = self.with_grippers(answers=("", "0"))     # then Ctrl-C (no more input)
@@ -302,7 +302,30 @@ class RunnerTests(unittest.TestCase):
             code, report = self.run_trial(arms=receive, extra=["--holding"])
         self.assertEqual(code, 0)
         events = [e for e in FakeNav.log if e[0] in ("grip", "start")]
-        self.assertEqual(events, [("start", "D"), ("grip", "open"), ("start", "undock"), ("start", "T")])
+        # closed once more (same position, the hold torque stays on while driving), never opened before D
+        self.assertEqual(events, [("grip", "close"), ("start", "D"), ("grip", "open"), ("start", "undock"),
+                                  ("start", "T")])
+
+    def test_older_carry_pose_only_turns_the_wrists(self):
+        from skye_task.config import load_config
+        receive = load_config(self.cfg).receive
+        old = [list(arm[:5]) + [arm[5] + 6.2, arm[6] + 1.8 * (1 if i == 0 else -1)] for i, arm in enumerate(receive)]
+        code, report = self.run_trial(arms=old)
+        self.assertEqual(code, 0)
+        names = [s["name"] for s in report["steps"]]
+        self.assertIn("carry_wrists", names)
+        self.assertNotIn("ready", names)                                   # no prepare(): not via the ready pose
+        self.assertLess(names.index("carry_wrists"), names.index("forward"))
+        moved = [s for s in report["steps"] if s["name"] == "carry_wrists" and "targets" in s]
+        for step in moved:
+            self.assertEqual(step["targets"], [list(a) for a in receive])
+        # another joint off as well: refused, nothing moves
+        FakeNav.log = []
+        bad = [list(a) for a in old]; bad[0][1] += 3.0
+        code, report = self.run_trial(arms=bad)
+        self.assertEqual(code, 1)
+        self.assertNotIn("carry_wrists", [s["name"] for s in report["steps"]])
+        self.assertNotIn(("start", "D"), FakeNav.log)
 
     def test_holding_requires_the_carry_pose(self):
         code, report = self.run_trial(extra=["--holding"])                  # arms at ready

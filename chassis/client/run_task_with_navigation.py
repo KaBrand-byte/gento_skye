@@ -44,7 +44,9 @@ BLOCK_RETRIES = 5          # an object blocking the docking: ask to clear it and
 MAX_LIFT_ASSIST_MM = 60.0  # at most this much of the place descent is done by the lift instead of the arms
 PLACE_LIFT_MM = 50.0       # after the arms' descent the lift always lowers at least this much (tray set down on
                            # the belt, not dropped on release: 15 and 30 mm were not enough at D, 2026-11-16)
-ARM_MARGIN_MM = 10.0       # stay this far inside the arms' planning limit (elbow not near straight)     # the controller refuses a new link (-22) for ~1 s after the previous one was closed
+WRIST_ADJUST_DEG = 10.0    # arms in an older carry pose where only the two wrist joints differ by up to this: turn
+                           # just the wrists to the configured carry pose (receive changed 2026-11-17)
+ARM_MARGIN_MM = 10.0      # stay this far inside the arms' planning limit (elbow not near straight)     # the controller refuses a new link (-22) for ~1 s after the previous one was closed
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -104,17 +106,22 @@ class Trial:
             return all(abs(a - b) <= tol for arm, target in zip(joints, pose) for a, b in zip(arm, target))
         if near(config.receive, 1.0):
             return "carry"
+        if all(abs(a - b) <= (WRIST_ADJUST_DEG if j >= 5 else 1.0)
+               for arm, target in zip(joints, config.receive) for j, (a, b) in enumerate(zip(arm, target))):
+            return "carry_wrist"                            # an older carry pose: only the wrists differ
         if near(config.ready) or near(config.transition):
             return "prepare"
         raise MotionError("双臂既不在运输（接盘）位，也不在准备位或过渡位；prepare() 会直接回准备位（曾导致双臂相撞）。"
                           "请先经过渡位把双臂移回准备位。"
                           f"当前关节: {[[round(v, 1) for v in arm] for arm in joints]}")
 
-    def attach_at_carry(self):
+    def attach_at_carry(self, wrists=False):
         """The arms already stand in the carry (receive) pose (e.g. left there by the previous run): do what
         skye_task's prepare() does to connect and enable - without any arm or lift motion.  The grippers are NOT
         opened here (a tray may still be held after a stop); a normal run opens them on arrival at the start
-        station, --holding never opens them before the place station."""
+        station, --holding never opens them before the place station.
+        wrists=True: an older carry pose where only the two wrist joints differ (the config's carry pose was
+        changed, 2026-11-17): only the wrists turn to the configured pose."""
         seq, sdk, gripper = self.sequence, self._sdk, self.gripper
         seq.begin = time.monotonic()
         seq._checkpoint()
@@ -125,12 +132,20 @@ class Trial:
         seq._guard(feedback, require_position=False)
         if any(state >= 3 for state in feedback.trajectory_states):
             raise MotionError("已有双臂轨迹正在执行，需人工处理")
-        if any(not seq._near(a, t) for a, t in zip(feedback.joints, seq.config.receive)):
+        if not wrists and any(not seq._near(a, t) for a, t in zip(feedback.joints, seq.config.receive)):
             raise MotionError("双臂已不在运输（接盘）位")
         seq.fixed = {name: list(feedback.rt[name]["fb_pos"][:size]) for name, size in FIXED_AXES.items()}
         sdk.enter_position(feedback, seq._checkpoint)
         seq.result.metadata["tool_xyzabc_mm_deg"] = sdk.tools
-        seq._record("initialized", status="completed", note="arms already in the carry pose: no arm motion")
+        if wrists:
+            target = seq.config.receive
+            if any(abs(a - b) > (WRIST_ADJUST_DEG if j >= 5 else 1.0)
+                   for arm, t in zip(feedback.joints, target) for j, (a, b) in enumerate(zip(arm, t))):
+                raise MotionError("双臂已不在运输（接盘）位")
+            logging.info("运输位姿态已更新：只转动腕部关节到新姿态 %s", [arm[5:] for arm in target])
+            seq._move_joint("carry_wrists", target)
+        seq._record("initialized", status="completed",
+                    note="wrists turned to the new carry pose" if wrists else "arms already in the carry pose: no arm motion")
         if gripper is not None:
             gripper.connect()                               # enables at the measured position: holds what it holds
         seq.prepared = True
@@ -294,6 +309,8 @@ class Trial:
                 elif answer in ("o", "0"):
                     self.grip("o"); closed = False; log.append(answer)
                 elif answer == "1":
+                    if not closed:                          # closed before the run: close here too, so the
+                        self.grip("c"); log.append("close")  # grippers keep holding (hold torque) while driving
                     log.append("1"); logging.info("交接反馈 1：托盘已夹好")
                     return
                 else:
@@ -408,11 +425,13 @@ class Trial:
         exit_code = 1
         try:
             start_pose = self.arm_start(config)             # before any motion
-            if a.holding and start_pose != "carry":
+            if a.holding and start_pose == "prepare":
                 raise MotionError("--holding：双臂必须已在运输（接盘）位且夹着托盘")
-            if start_pose == "carry":
-                logging.info("双臂已在运输（接盘）位：不动手臂，直接接入%s", "（夹着托盘，不张爪）" if a.holding else "")
-                self.attach_at_carry()
+            if start_pose in ("carry", "carry_wrist"):
+                logging.info("双臂已在运输（接盘）位：%s，直接接入%s",
+                             "只转腕部到新姿态" if start_pose == "carry_wrist" else "不动手臂",
+                             "（夹着托盘，不张爪）" if a.holding else "")
+                self.attach_at_carry(wrists=start_pose == "carry_wrist")
             else:
                 self.sequence.prepare()                     # arms into the carry (receive) pose
             self.preflight_place()                          # read-only, before the tray is handed over
@@ -421,14 +440,15 @@ class Trial:
             cycle = os.environ.get("GENTO_CYCLE", "")
             prefix = f"第 {cycle} 次：" if cycle and cycle != "1/1" else ""
             if a.holding:
-                logging.info("--holding：托盘已在双爪中，不交接，直接去放置点")
+                logging.info("--holding：托盘已在双爪中，不交接；再闭合一次（保持力矩），直接去放置点")
+                self.close_grippers()
             elif not sys.stdin.isatty():
                 logging.info("无终端：不提示交接，按托盘已夹好出发")
             else:
                 if a.handover:                              # drive to T first and open there
                     if a.start:
                         self.navigate(a.start)
-                    if start_pose == "carry" and self.gripper is not None:
+                    if start_pose != "prepare" and self.gripper is not None:
                         self.sequence._gripper_action("open_before_receive", GripperAction.OPEN)
                 self.handover(f"{prefix}交接托盘（就在当前位置，双臂在运输位不动）。")
             self.navigate(a.place)
