@@ -1582,6 +1582,18 @@ elif cmd == 'teach-waypoint':
     if 'clear' in args[1:]:
         w.pop(name, None); RT.save_waypoints(WP_FILE, w); log('waypoint', name, 'removed; left:', ', '.join(sorted(w)) or 'none')
         raise SystemExit(0)
+    if 'norandom' in args[1:] or 'random' in args[1:]:
+        # keep the waypoint, only take it out of (or back into) the random route choice; --via NAME still works
+        if name not in w:
+            raise SystemExit('ABORT: no waypoint %s (known: %s)' % (name, ', '.join(sorted(w)) or 'none'))
+        if 'norandom' in args[1:]:
+            w[name]['random'] = False
+        else:
+            w[name].pop('random', None)
+        RT.save_waypoints(WP_FILE, w)
+        log('waypoint', name, 'is %s random routes' % ('NOT in' if w[name].get('random') is False else 'in'),
+            '| random routes use:', ', '.join(k for k, v in sorted(w.items()) if v.get('random') is not False) or 'none')
+        raise SystemExit(0)
     check_localisation()
     h = RM.rotation_hits(cloud(fresh=True), CFG)
     if h and 'force' not in args[1:]:
@@ -1604,7 +1616,8 @@ elif cmd == 'waypoints':
     # waypoints : NO MOTION.  List the waypoints and which of them a random route between the stations may use
     w = RT.load_waypoints(WP_FILE); st = load_st()
     for k, v in sorted(w.items()):
-        log('%-6s %s  (taught %s)' % (k, v['pose'], v.get('taught', '?')))
+        log('%-6s %s  (taught %s)%s' % (k, v['pose'], v.get('taught', '?'),
+                                        '  NOT in random routes (only --via %s)' % k if v.get('random') is False else ''))
     sp = {k: s['staging_pose'] for k, s in st.items() if 'staging_pose' in s}
     for a in sorted(sp):
         for b in sorted(sp):

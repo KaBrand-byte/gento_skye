@@ -20,7 +20,8 @@
 #   run.sh teach-staging NAME [map]  NO MOTION: robot at a safe point (room to turn) near NAME: record it as NAME's
 #                           staging point; "map": dock NAME by map position (turn here, translate straight to it)
 #   run.sh teach-ref NAME   NO MOTION: robot EXACTLY at map station NAME: record a reference scan (docking ends on it)
-#   run.sh teach-waypoint NAME [clear|force]  NO MOTION: robot in an open area (room to turn): route waypoint
+#   run.sh teach-waypoint NAME [clear|force|norandom|random]  NO MOTION: robot in an open area (room to turn): route waypoint
+#                           (norandom: keep NAME but never pick it for a random route; random: allow it again)
 #   run.sh waypoints        list the waypoints and which ones a random route between the stations may use
 #   run.sh accept NAME [clear]  NO MOTION: robot lined up on NAME's approach line (>= 0.25 m before it): record what the model
 #                           touches there as verified-clear (on site); docking ignores exactly those points
@@ -67,7 +68,7 @@ case "$1" in
             extra=$(python3 -c "import json,sys;s=json.load(open('stations.json')).get(sys.argv[1]);print('' if s is None else ('--here --closest' if s.get('untaught') else '--closest'))" "$name")
             [ -z "$extra" ] && { echo "unknown station $name"; exit 1; }
             start "$name" timeout 650 python3 dock.py dock "$name" $g --leave $extra "${route[@]}" ;;
-  teach-waypoint) [ -z "$2" ] && { echo "usage: teach-waypoint NAME [clear]"; exit 1; }
+  teach-waypoint) [ -z "$2" ] && { echo "usage: teach-waypoint NAME [clear|force|norandom|random]"; exit 1; }
             timeout 90 python3 dock.py teach-waypoint "$2" ${3:+"$3"} ;;
   waypoints) timeout 30 python3 dock.py waypoints ;;
   teach-staging) [ -z "$2" ] && { echo "usage: teach-staging NAME [map]"; exit 1; }

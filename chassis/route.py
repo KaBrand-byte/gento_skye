@@ -40,6 +40,8 @@ def eligible(start, dest, waypoints):
     """Waypoint names that make sense between start and dest (map x, y), sorted by name."""
     direct = _d(start, dest); out = []
     for k, v in sorted(waypoints.items()):
+        if v.get('random') is False:                    # kept, but not for random routes (--via NAME still works)
+            continue
         p = v['pose']
         if _d(p, start) < VIA_MIN_DIST or _d(p, dest) < VIA_MIN_DIST:
             continue

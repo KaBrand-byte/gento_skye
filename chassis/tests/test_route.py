@@ -48,6 +48,18 @@ class WaypointTests(unittest.TestCase):
             for k in ("W1", "W2", None):
                 self.assertTrue(0.30 < picks.count(k) / 3000 < 0.37, (k, picks.count(k)))
 
+    def test_waypoint_left_out_of_random_routes(self):
+        # 2026-11-17: W2 gave odd vendor paths (7.6 m, 56 reversals) -> random routes only W1 / direct
+        t_safe, d_safe = (1.263, 1.808), (3.054, -0.852)
+        site = {"W1": {"pose": [3.799, 0.502, 118.4]}, "W2": {"pose": [2.437, -0.08, -64.2], "random": False}}
+        rng = random.Random(4)
+        for a, b in ((t_safe, d_safe), (d_safe, t_safe)):
+            self.assertEqual(RT.eligible(a, b, site), ["W1"])
+            picks = [RT.choose_via(a, b, site, "random", rng)[0] for _ in range(2000)]
+            self.assertNotIn("W2", picks)
+            self.assertTrue(0.45 < picks.count("W1") / 2000 < 0.55)
+            self.assertEqual(RT.choose_via(a, b, site, "W2")[0], "W2")      # still usable when asked for
+
     def test_random_without_waypoints_is_direct(self):
         self.assertIsNone(RT.choose_via((0, 0), (3, 0), {}, "random")[0])
 

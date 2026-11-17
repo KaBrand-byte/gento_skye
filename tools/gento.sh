@@ -19,6 +19,7 @@
 #   teach-staging NAME [map]  NO MOTION: robot at a safe point near NAME (room to turn): its staging point
 #   teach-ref NAME        NO MOTION: robot exactly at map station NAME: record a reference scan
 #   teach-waypoint NAME [clear]  NO MOTION: robot in an open area (room to turn): record route waypoint NAME
+#   teach-waypoint NAME norandom|random   NO MOTION: keep NAME but leave it out of random routes / allow it again
 #   waypoints             list waypoints and which ones a random route may use     (no motion)
 #   accept NAME [clear]   NO MOTION: robot lined up in front of NAME: structure verified clear on site
 #   restage NAME          NO MOTION: recompute the staging spot of a taught station from here
