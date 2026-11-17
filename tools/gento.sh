@@ -11,6 +11,9 @@
 #                         --via: default random (waypoints / direct equally likely), none = direct, --jitter: random spot within R m of the safe point
 #   lineup NAME           DRIVE: like goto, but stop lined up in front of NAME before driving in  (asks y/n)
 #   undock                DRIVE: reverse straight out along the last docking approach              (asks y/n)
+#   record-bg NAME        DRIVE: goto NAME that also records its background (afterwards only NEW objects block);
+#                         the belt in front must be empty, nobody in front of the robot           (asks y/n)
+#   bg-clear NAME         NO MOTION: forget NAME's recorded background
 #   tune NAME KEY VALUE   fine-tune: gap (m) | lat_offset (m, + = further left) | yaw_offset (deg, + = left)
 #   teach-pose NAME [BACK] [left|right]   NO MOTION: robot EXACTLY at the final pose of NAME: record it
 #   teach-staging NAME [map]  NO MOTION: robot at a safe point near NAME (room to turn): its staging point
@@ -68,7 +71,9 @@ case "$cmd" in
   check)      ch check "${1:-D}" ;;
   bench)      ch bench "${1:-D}" ;;
   latency)    ch latency "${1:-5}" ;;
-  tune|teach-pose|teach-staging|teach-ref|teach-waypoint|accept|restage)  ch "$cmd$(quote "$@")" ;;
+  tune|teach-pose|teach-staging|teach-ref|teach-waypoint|accept|restage|bg-clear)  ch "$cmd$(quote "$@")" ;;
+  record-bg)  [ -n "$1" ] || { echo "usage: gento record-bg NAME"; exit 1; }
+              confirm "dock at $1 and record its background (belt in front EMPTY, nobody in front)"; ch_t "record-bg$(quote "$1")" ;;
   goto)       [ -n "$1" ] || { echo "usage: gento goto NAME [GAP]"; exit 1; }
               confirm "dock at station $1"; ch_t "goto$(quote "$@")" ;;
   lineup)     [ -n "$1" ] || { echo "usage: gento lineup NAME"; exit 1; }

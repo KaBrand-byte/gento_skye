@@ -59,6 +59,21 @@ class FakeNav:
         pass
 
 
+class BlockedOnceNav(FakeNav):
+    """The first docking at D ends BLOCKED (an object in the way, the chassis gave up waiting); the retry works."""
+    def __init__(self, **kw):
+        super().__init__(**kw); self.blocked = False
+
+    def raise_if_failed(self):
+        if self.active == "D" and not self.blocked and self.count > 1:
+            self.blocked = True
+            raise NavigationError("ABORT: BLOCKED: place spot under the tray blocked by obstacle {} - still there after 30 s")
+
+    def is_arrived_and_stopped(self):
+        self.count += 1
+        return self.count > 2 and (self.active != "D" or self.blocked)
+
+
 @dataclass
 class FakeGripperConfig:
     def action_positions(self, action, side):
@@ -115,7 +130,7 @@ class RunnerTests(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
-    def run_trial(self, fail_on=None, extra=(), arms=None):
+    def run_trial(self, fail_on=None, extra=(), arms=None, nav_cls=None):
         def device(config):
             d = Device(config)
             d.close = lambda: None                                           # the real GentoSDK has close()
@@ -123,7 +138,7 @@ class RunnerTests(unittest.TestCase):
                 arm["fb"]["fb_pos"] = list((arms or config.ready)[i])
             return d
         with mock.patch.object(runner, "GentoSDK", side_effect=device), \
-             mock.patch.object(runner, "GentoNavigation", side_effect=lambda **kw: FakeNav(fail_on=fail_on, **kw)), \
+             mock.patch.object(runner, "GentoNavigation", side_effect=lambda **kw: (nav_cls or FakeNav)(fail_on=fail_on, **kw)), \
              mock.patch.object(runner, "wait_for_start", lambda seq: None):
             code = runner.main(["--config", str(self.cfg), "--result", str(self.result), "--poll", "0.01",
                                 "--place-gap", "0.3", *extra])
@@ -261,6 +276,18 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(report["status"], "completed")
         self.assertEqual(report["metadata"]["return_status"], "failed")
         self.assertIn(("stop", "undock"), FakeNav.log)
+
+    def test_blocked_docking_is_retried_after_enter_on_a_terminal(self):
+        with mock.patch.object(runner.sys.stdin, "isatty", lambda: True):
+            code, report = self.run_trial(nav_cls=BlockedOnceNav)
+        self.assertEqual(code, 0)
+        self.assertEqual([e for e in FakeNav.log if e[0] == "start"],
+                         [("start", "T"), ("start", "D"), ("start", "D"), ("start", "undock"), ("start", "T")])
+
+    def test_blocked_docking_without_a_terminal_fails(self):
+        with mock.patch.object(runner.sys.stdin, "isatty", lambda: False):
+            code, report = self.run_trial(nav_cls=BlockedOnceNav)
+        self.assertEqual(code, 1)
 
     def test_failure_at_the_place_station_stops_chassis_and_arms_without_placing(self):
         code, report = self.run_trial(fail_on="D")

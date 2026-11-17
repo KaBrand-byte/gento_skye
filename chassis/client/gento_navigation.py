@@ -213,6 +213,11 @@ class GentoNavigation:
         status = self._current()
         return status.get("state") == "done" and status.get("job") == self.active
 
+    def note(self):
+        """Progress note of the running job, e.g. 'WAITING: ... blocked ...' while an object is in the way."""
+        status = self._current()
+        return status.get("note") if status.get("state") == "running" else None
+
     def raise_if_failed(self):
         status = self._current()
         if status.get("state") == "failed":

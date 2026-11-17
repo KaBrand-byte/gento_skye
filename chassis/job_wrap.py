@@ -15,7 +15,7 @@ def status(**kw):
 
 job = sys.argv[1]; cmd = sys.argv[sys.argv.index('--') + 1:]
 status(state='running', job=job, pid=os.getpid())
-final = error = None
+final = error = None; waiting = False
 with open(LOG, 'a') as log:
     log.write('===== %s %s\n' % (time.strftime('%H:%M:%S'), ' '.join(cmd))); log.flush()
     p = subprocess.Popen(cmd, cwd=HERE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
@@ -24,6 +24,10 @@ with open(LOG, 'a') as log:
         body = re.sub(r'^\[[^\]]*\]\s*', '', line)       # dock.py log lines carry a [time elapsed] prefix
         if body.startswith(('FINAL', 'STAGE-ONLY')):
             final = body.strip()
+        elif body.startswith('WAITING'):                  # blocked, waiting for the object to go (dock.py guarded)
+            status(state='running', job=job, pid=os.getpid(), note=body.strip()); waiting = True
+        elif waiting and body.lstrip().startswith('rel move'):
+            status(state='running', job=job, pid=os.getpid()); waiting = False
         elif 'ABORT' in line:
             error = line.strip()
     rc = p.wait()

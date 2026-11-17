@@ -205,7 +205,14 @@ def safe_rotate(yaw):
     rel(0.0, yaw)
 
 
-def measure(near=False):
+FACE_KEEP = 0.04       # m: re-measuring after a turn in place keeps the face at this distance (+-) from the centre
+
+
+def measure(near=False, expect=None):
+    """Fit the face ahead.  expect: a previous fit of the SAME face (the robot only turned in place since): the
+    distance from the robot centre to the face line does not change with a turn, so only lines within FACE_KEEP of
+    it count - otherwise a second surface nearby can win the fit (2026-11-16 at D: after a 1.9 deg turn the fit
+    jumped from the conveyor at 0.75 m to a low structure at 0.84 m and the heading followed it by 8 deg)."""
     a = cloud(fresh=True)
     if near:   # close to the face: leave out only the robot's own points (measured arm shape), not a whole zone
         sel = (a[:, 0] > FRONT + 0.02) & (a[:, 0] < 1.3) & (np.abs(a[:, 1]) < YLIM[0])
@@ -226,7 +233,10 @@ def measure(near=False):
         d /= L
         if abs(d[1]) < 0.85:      # want a face roughly across the heading
             continue
-        nr = np.array([-d[1], d[0]]); inl = np.abs((sub - sub[i]) @ nr) < 0.012
+        nr = np.array([-d[1], d[0]])
+        if expect is not None and abs(abs(sub[i] @ nr) - expect['dist']) > FACE_KEEP:
+            continue
+        inl = np.abs((sub - sub[i]) @ nr) < 0.012
         sc = inl.sum() - 50 * abs(sub[i] @ nr) * len(sub) / 3000.0   # prefer the nearest face
         if best[0] is None or sc > best[0]:
             best = (sc, (sub[i].copy(), nr))
@@ -241,6 +251,8 @@ def measure(near=False):
     if nr[0] < 0:
         nr = -nr                   # normal pointing forward (+x)
     dist = float(cen @ nr); err = math.atan2(nr[1], nr[0])   # +ve: face normal to the left -> turn left
+    if expect is not None and abs(dist - expect['dist']) > FACE_KEEP:
+        return None
     rms = float(np.sqrt((((pts - cen) @ nr) ** 2).mean())); t_ = np.sort((pts - cen) @ d)
     cut = np.where(np.diff(t_) > 0.04)[0]; runs = np.split(t_, cut + 1)
     t0 = -(cen @ d)                          # where the robot's centre line meets the face
@@ -390,7 +402,14 @@ def align_heading(m, dry=False):
             break
         # small turns: no shortfall compensation (measured: left turns are exact, right ones scatter +-0.8 deg)
         safe_rotate(e if abs(e) < math.radians(5) else e + math.copysign(ROT_SHORT, e))
-        m = measure() or measure(near=True); log('  re-measure', pub(m))
+        prev = m
+        m = measure(expect=prev) or measure(near=True, expect=prev)          # the same face as before the turn
+        if not m:           # safe_rotate may have had to move first: then the distance changed
+            log('  the face at %.3f m not found again after the turn - taking the face ahead' % prev['dist'])
+            m = measure() or measure(near=True)
+            if not m:
+                raise SystemExit('ABORT: no face found ahead after turning')
+        log('  re-measure', pub(m))
     return m
 
 
@@ -450,6 +469,35 @@ def sideways_small(dy, st, fwd):
     log('sideways correction %.3f m (%s)' % (dy, ' then '.join('%.3f' % s_ for s_ in steps)))
     for s_ in steps:
         rel(0.0, 0.0, y=s_)
+
+
+SLANT_TOL = 0.015      # m: lateral offsets up to this are left alone (no move); larger ones by slant_move
+
+
+def _turned(p, yaw):
+    """Points of the robot frame seen from the same spot after turning by yaw."""
+    c, s_ = math.cos(-yaw), math.sin(-yaw); q = p.copy()
+    q[:, 0] = c * p[:, 0] - s_ * p[:, 1]; q[:, 1] = s_ * p[:, 0] + c * p[:, 1]
+    return q
+
+
+def slant_plan(dy, dx, p, what):
+    """Check (no motion) reaching the point dx ahead / dy to the side WITHOUT a sideways move: turn towards it,
+    drive straight, turn back.  p: robot-frame cloud (own points and accepted structure removed).  Raises if any
+    of the three moves is blocked; returns (turn, distance)."""
+    a = math.atan2(dy, dx); d = math.hypot(dx, dy)
+    need_clear(RM.turn_hits(p, CFG, a), what + ' (turn towards the line)')
+    q = _turned(p, a)
+    need_clear(RM.sweep_hits(q, CFG, d, 0.0), what + ' (straight, slanted)')
+    need_clear(RM.turn_hits(q - np.array([d, 0.0, 0.0]), CFG, -a), what + ' (turn back)')
+    return a, d
+
+
+def slant_move(a, d, short, what):
+    """Run a checked slant_plan: turn a, straight d (+ short: the chassis' stop shortfall), turn back."""
+    log('%s: turn %.1f deg, straight %.3f m, turn back (no sideways move)' % (what, math.degrees(a), d))
+    comp = (lambda e: e if abs(e) < math.radians(5) else e + math.copysign(ROT_SHORT, e))
+    rel(0.0, comp(a)); rel(d + short, 0.0); rel(0.0, comp(-a))
 
 
 FINAL_X_TOL = 0.008     # m: remaining distance to the taught pose (reference scan) corrected after the last stage
@@ -515,10 +563,27 @@ def _vox_hash(k):
     return (k[:, 0] << 26) | (k[:, 1] << 13) | k[:, 2]
 
 
+SURF_BAND = (0.04, 0.02)   # m below / above the measured work-surface top that counts as the surface itself
+
+
+def surface_filter(p, st):
+    """Place stations: drop the work surface itself (its top, +-noise) ahead of the robot.  The carried arms run
+    level with the belt top (model: lowest arm part 0.818 m, belt 0.82 m; verified on site that they clear it) and
+    the arms + tray are MEANT to go over it; with the model's 3 cm margin every belt point was an obstacle, and the
+    belt seen from further back is not covered by the accepted points (2026-11-16: stops at gap 0.18 / 0.32 with no
+    real obstacle).  Anything standing on the surface (> top + 2 cm) still counts."""
+    sz = SURF[0]
+    if not st.get('place') or sz is None or not len(p):
+        return p
+    drop = (p[:, 0] > FRONT + 0.02) & (p[:, 2] > sz - SURF_BAND[0]) & (p[:, 2] <= sz + SURF_BAND[1])
+    return p[~drop]
+
+
 def accepted_filter(p, st, fwd, dy=0.0):
     """Drop the points that were recorded at this station with `accept` (static structure next to the final
-    pose that the conservative arm model touches but the real arms do not - verified on site).  p: robot frame,
-    the final pose is (fwd, dy) ahead of the robot."""
+    pose that the conservative arm model touches but the real arms do not - verified on site) and, at place
+    stations, the work surface itself (surface_filter).  p: robot frame, the final pose is (fwd, dy) ahead."""
+    p = surface_filter(p, st)
     acc = st.get('accepted')
     if not acc or not len(p):
         return p
@@ -556,7 +621,7 @@ def model_hits_mask(p, fwd, sz, place):
 SURF = [None]          # top of the work surface for this docking (see plan_approach)
 
 
-def plan_approach(m, st, gap, dy=None):
+def plan_approach(m, st, gap, dy=None, sideways=True):
     """Check the final approach to the TAUGHT pose (the arm motion is hard-coded, so the base never picks
     another spot): sideways move to the taught lateral position, straight forward to the taught gap, and -
     for a place station - the spot under the tray must be empty.  Any problem -> stop and report."""
@@ -571,7 +636,8 @@ def plan_approach(m, st, gap, dy=None):
     sz = SURF[0]
     p = accepted_filter(p, st, fwd, dy)
     log('plan: sideways %.3f m, forward %.3f m, surface top %s m' % (dy, fwd, None if sz is None else round(sz, 3)))
-    need_clear(RM.sweep_hits(p, CFG, 0.0, dy), 'sideways move to the taught position')
+    if sideways:      # stations with a reference scan get to the line by slant_move (checked there), not sideways
+        need_clear(RM.sweep_hits(p, CFG, 0.0, dy), 'sideways move to the taught position')
     need_clear(RM.sweep_hits(p - np.array([0.0, dy, 0.0]), CFG, fwd, 0.0), 'straight approach')
     if st.get('place'):
         if sz is None:
@@ -841,11 +907,119 @@ def ref_offset(name, seed=None):
         raise SystemExit('ABORT: the scan does not match the reference of %s (too few common points)' % name)
     R, t, rms, frac = r; th = math.atan2(R[1, 0], R[0, 0])
     d = R.T @ (-t)
+    if not (rms > 0.04 or frac < 0.5):
+        LAST_ICP[name] = (R, t, MOVES[0])
     log('  scan match: rms %.3f m, %.0f%% matched, to go x %.3f y %.3f yaw %.2f deg' % (rms, 100 * frac, d[0], d[1], -math.degrees(th)))
     if rms > 0.04 or frac < 0.5:
         raise SystemExit('ABORT: poor match with the reference of %s (rms %.3f m, %.0f%%) - surroundings changed? '
                          'teach-ref again' % (name, rms, 100 * frac))
     return float(d[0]), float(d[1]), -th
+
+
+LAST_ICP = {}           # name -> (R, t, moves): robot frame -> reference-pose frame of the last good match
+BG_VOX = 0.03           # m: background voxels; a live point within one voxel of a recorded one is "already there"
+BG_AHEAD = 0.05         # background is recorded only ahead of the robot's front edge - 5 cm (the person guarding
+                        # the robot stands beside / behind it and must never become "background")
+_BG = {}
+
+
+def bg_file(name):
+    return os.path.join(REF_DIR, name + '_bg.npy')
+
+
+def _hash3(k):
+    k = np.asarray(k).astype(np.int64) + 32768
+    return (k[:, 0] << 34) | (k[:, 1] << 17) | k[:, 2]
+
+
+def bg_data(name):
+    """Recorded background of station `name` (voxels in its reference-pose frame), dilated by one voxel and
+    sorted for a fast lookup; None if none recorded."""
+    f = bg_file(name)
+    if not os.path.exists(f):
+        return None
+    key = os.path.getmtime(f)
+    if _BG.get(name, (None,))[0] != key:
+        v = np.load(f).astype(np.int64)
+        offs = np.array(np.meshgrid([-1, 0, 1], [-1, 0, 1], [-1, 0, 1])).T.reshape(-1, 3)
+        _BG[name] = (key, len(v), np.unique(np.concatenate([_hash3(v + o) for o in offs])))
+    return _BG[name]
+
+
+def to_station(p, R, t):
+    q = p.copy(); q[:, :2] = p[:, :2] @ R.T + t
+    return q
+
+
+def station_transform(name, st):
+    """(R, t): robot frame -> frame of the reference pose of `name`, for where the robot stands now."""
+    c = LAST_ICP.get(name)
+    if c is None or c[2] != MOVES[0]:
+        ref_offset(name, seed=rel_target(st['pose']))
+        c = LAST_ICP[name]
+    return c[0], c[1]
+
+
+def background_filter(p, name, st):
+    """Leave out what was already there when the background of `name` was recorded (conveyor, belt, frames,
+    cabinets ...): only NEW things - a tray left on the belt, a box, a person - can block the docking."""
+    bg = bg_data(name)
+    if bg is None or not len(p):
+        return p
+    R, t = station_transform(name, st)
+    h = _hash3(np.floor(to_station(p, R, t) / BG_VOX))
+    dil = bg[2]; i = np.minimum(np.searchsorted(dil, h), len(dil) - 1)
+    return p[dil[i] != h]
+
+
+def clear_cloud(name, st, fwd, dy):
+    """Points that can block (robot frame): own points, accepted structure, the work surface and the recorded
+    background left out.  fwd, dy: where the final pose is, as for accepted_filter."""
+    return background_filter(accepted_filter(RM.remove_self(cloud(), CFG), st, fwd, dy), name, st)
+
+
+def add_background(name, st, where):
+    """Record what is around now (ahead of the robot) as background of `name`.  The place zone above the work
+    surface is never recorded: whatever stands there must always block (e.g. the last tray still on the belt)."""
+    R, t = station_transform(name, st)
+    p = RM.remove_self(cloud(), CFG)
+    p = p[(p[:, 0] > FRONT - BG_AHEAD) & (np.hypot(p[:, 0], p[:, 1]) < 3.5) & (p[:, 2] > 0.02) & (p[:, 2] < 2.0)]
+    q = to_station(p, R, t)
+    face = FRONT + float(st.get('ref_gap', st['gap']))           # the face in the reference-pose frame
+    sz = RM.surface_height(q, face)
+    if st.get('place'):
+        if sz is None:
+            raise SystemExit('ABORT: cannot see the surface of %s - background not recorded' % name)
+        q = q[~((q[:, 0] > face - 0.02) & (q[:, 0] < face + 0.8) & (np.abs(q[:, 1]) < 0.5) & (q[:, 2] > sz + 0.02))]
+    v = np.unique(np.floor(q / BG_VOX).astype(np.int64), axis=0)
+    f = bg_file(name)
+    old = np.load(f).astype(np.int64) if os.path.exists(f) else np.zeros((0, 3), np.int64)
+    allv = np.unique(np.concatenate([old, v]), axis=0)
+    np.save(f, allv.astype(np.int32))
+    log('background of %s recorded at %s: %d voxels here, %d new, %d in all (place zone above the surface %s m '
+        'left out)' % (name, where, len(v), len(allv) - len(old), len(allv), None if sz is None else round(sz, 3)))
+
+
+BLOCK_WAIT = float(os.environ.get('GENTO_BLOCK_WAIT', '30'))     # s: wait this long for a blocking object to go
+
+
+def guarded(fn, what):
+    """Run a no-motion check that raises "... blocked by obstacle ..." (need_clear); while it is blocked, wait
+    (fresh scans) up to BLOCK_WAIT s for the object to go - a person walking past, a tray being taken off -
+    then give up with ABORT: BLOCKED (the task on the Orin then asks to clear it and retry)."""
+    t0 = time.time(); k = 0
+    while True:
+        try:
+            return fn()
+        except SystemExit as e:
+            if 'blocked by obstacle' not in str(e):
+                raise
+            left = BLOCK_WAIT - (time.time() - t0)
+            if left <= 0:
+                raise SystemExit('ABORT: BLOCKED: %s - still there after %.0f s' % (str(e).replace('ABORT: ', ''), BLOCK_WAIT))
+            if k % 5 == 0:
+                log('WAITING: %s - waiting for it to clear (%.0f s left)' % (str(e).replace('ABORT: ', ''), left))
+            k += 1; spin(1.0); _CACHE['t'] = 0.0                  # next check on a fresh scan
 
 
 def ref_approach(name):
@@ -1135,6 +1309,125 @@ for _fn, _what in (('leave_map_station', 'leave the station (back to its safe po
                    ('translate', 'straight path'), ('ref_offset', 'reference scan match'),
                    ('nav_task', 'navigation task to the safe point')):
     globals()[_fn] = _planner(globals()[_fn], _what)
+
+def _after_move(d, dx, dy, dyaw):
+    """Predicted (to go x, y, yaw) to the reference pose after moving (dx, dy) and then turning dyaw."""
+    x, y = d[0] - dx, d[1] - dy; c, s_ = math.cos(-dyaw), math.sin(-dyaw)
+    return (c * x - s_ * y, s_ * x + c * y, d[2] - dyaw)
+
+
+def _comp(a):
+    return a if abs(a) < math.radians(5) else a + math.copysign(ROT_SHORT, a)
+
+
+def dock_by_ref(name, st, gap, record=False):
+    """Docking at a station with a reference scan, from its safe point, WITHOUT the face fit: heading, sideways
+    and forward all come from the reference scan (~1 cm; the face fit can lock onto another surface), and only
+    NEW objects block (background_filter).  The final pose is `off` = ref_gap - gap beyond the reference pose.
+    No pure sideways moves (slant_move).  Blocked checks wait for the object to go (guarded).  record: also
+    record the background here, at stage 2 and at the final pose (supervised run, place zone empty)."""
+    off = float(st['ref_gap']) - gap
+    d = ref_offset(name, seed=rel_target(st['pose']))
+    if record:
+        add_background(name, st, 'the safe point')
+    log('docking %s by the reference scan only: final pose %.3f m beyond the reference pose (gap %.4f, reference '
+        'gap %.4f)%s' % (name, off, gap, st['ref_gap'], '' if bg_data(name) else ' - NO background recorded yet'))
+    for k in range(3):                                       # heading first, from the scan
+        if abs(d[2]) <= ANG_TOL:
+            break
+        a = d[2]
+        log('heading from the reference scan: turn %.2f deg' % math.degrees(a))
+        guarded(lambda: need_clear(RM.turn_hits(clear_cloud(name, st, d[0] + off, d[1]), CFG, a), 'heading correction'),
+                'heading correction')
+        rel(0.0, _comp(a)); d = ref_offset(name, seed=_after_move(d, 0.0, 0.0, a))
+    fwd, dy = d[0] + off, d[1]
+    if not 0.0 <= fwd <= MAX_FWD or abs(dy) > LAT_PLAN_MAX:
+        raise SystemExit('ABORT: the reference scan puts the final pose at x %.3f y %.3f - out of reach from here' % (fwd, dy))
+    SURF[0] = RM.surface_height(RM.remove_self(cloud(), CFG), fwd + FRONT + gap)
+    log('plan: final pose %.3f m ahead, %.3f m to the side, surface top %s m'
+        % (fwd, dy, None if SURF[0] is None else round(SURF[0], 3)))
+
+    def final_checks(fwd, dy):
+        p = clear_cloud(name, st, fwd, dy) - np.array([0.0, dy, 0.0])
+        need_clear(RM.sweep_hits(p, CFG, fwd, 0.0), 'straight approach on the station line')
+        if st.get('place'):
+            if SURF[0] is None:
+                raise SystemExit('ABORT: cannot see the surface the tray goes on')
+            need_clear(RM.place_hits(p, CFG, fwd, SURF[0]), 'place spot under the tray')
+            need_clear(RM.place_motion_hits(p, CFG, fwd, SURF[0]), 'place motion after docking')
+
+    guarded(lambda: final_checks(fwd, dy), 'final approach / place spot')
+    total = 0.0
+    if fwd > STAGE2 + 0.15:
+        first = fwd - STAGE2
+        if abs(dy) > SLANT_TOL:
+            a, dist = guarded(lambda: slant_plan(dy, first, clear_cloud(name, st, fwd, dy), 'approach to stage 2'),
+                              'approach to stage 2')
+            slant_move(a, dist, FWD_SHORT, 'approach to stage 2')
+            d = ref_offset(name, seed=_after_move(d, first, dy, 0.0))
+        else:
+            guarded(lambda: need_clear(RM.sweep_hits(clear_cloud(name, st, fwd, dy), CFG, first, 0.0), 'approach to stage 2'),
+                    'approach to stage 2')
+            log('approach to stage 2: forward %.3f m (sideways %.3f m left for the last stage)' % (first, dy))
+            rel(first + FWD_SHORT, 0.0)
+            d = ref_offset(name, seed=_after_move(d, first, 0.0, 0.0))
+        total += first + FWD_SHORT
+        if record:
+            add_background(name, st, 'stage 2')
+        if abs(d[2]) > ANG_TOL:
+            a = d[2]
+            guarded(lambda: need_clear(RM.turn_hits(clear_cloud(name, st, d[0] + off, d[1]), CFG, a), 'heading correction'),
+                    'heading correction')
+            rel(0.0, _comp(a)); d = ref_offset(name, seed=_after_move(d, 0.0, 0.0, a))
+        fwd, dy = d[0] + off, d[1]
+        log('  stage 2 (reference scan): final pose %.3f m ahead, %.3f m to the side, heading %.2f deg'
+            % (fwd, dy, math.degrees(d[2])))
+        guarded(lambda: final_checks(fwd, dy), 'last stage / place spot')
+    slant = None
+    if abs(dy) > SLANT_TOL:
+        try:
+            slant = guarded(lambda: slant_plan(dy, fwd, clear_cloud(name, st, fwd, dy), 'last stage'), 'last stage')
+        except SystemExit as e:
+            log('last stage: slanted path not clear (%s) - sideways correction instead' % e)
+            sideways_small(dy, st, fwd)
+    elif abs(dy) >= 0.008:
+        log('last stage: sideways %.3f m left alone (<= %.3f)' % (dy, SLANT_TOL))
+    if slant:
+        slant_move(slant[0], slant[1], FWD_SHORT_LAST, 'last stage')
+    else:
+        guarded(lambda: need_clear(RM.sweep_hits(clear_cloud(name, st, fwd, 0.0), CFG, fwd, 0.0), 'last stage'),
+                'last stage')
+        log('last stage: forward %.3f m' % fwd)
+        rel(fwd + FWD_SHORT_LAST, 0.0)
+    total += fwd + FWD_SHORT_LAST
+    # remainder from the scan: the chassis stops ~1-1.5 cm short on some floors (see final_forward_fix)
+    d = ref_offset(name, seed=_after_move(d, fwd, dy, 0.0)); rem = d[0] + off
+    if FINAL_X_TOL < rem <= FINAL_X_MAX:
+        steps = [rem] if rem >= SIDE_MIN else [-0.03, 0.03 + rem]
+        guarded(lambda: need_clear(RM.sweep_hits(clear_cloud(name, st, rem, 0.0), CFG, rem, 0.0), 'final forward correction'),
+                'final forward correction')
+        log('final forward correction %.3f m (%s)' % (rem, ' then '.join('%.3f' % x for x in steps)))
+        for x in steps:
+            rel(x, 0.0, rear_check=x < 0)
+        total += rem; d = ref_offset(name, seed=_after_move(d, rem, 0.0, 0.0)); rem = d[0] + off
+    else:
+        log('final check: %.3f m to the target - no correction' % rem)
+    YLIM[0] = 2.5; f = measure(near=True)
+    if record:
+        add_background(name, st, 'the final pose')
+        if f:
+            rg = f['gap'] - d[0]                          # face gap at the reference pose (d[0] still to go)
+            if abs(rg - st['ref_gap']) <= 0.04:
+                all_st = load_st(); all_st[name]['ref_gap'] = round(rg, 4); json.dump(all_st, open(ST_FILE, 'w'), indent=1)
+                log('reference gap of %s re-measured: %.4f (was %.4f)' % (name, rg, st['ref_gap']))
+            else:
+                log('reference gap re-measured as %.4f, far from %.4f - not stored (face fit?)' % (rg, st['ref_gap']))
+    res = dict(name=name, mode='ref', gap_target=gap, gap=f['gap'] if f else None, ang_deg=f['ang_deg'] if f else None,
+               err_x=round(rem, 4), err_y=round(d[1], 4), err_yaw_deg=round(math.degrees(d[2]), 2), fwd=round(total, 4))
+    log('FINAL', json.dumps(res))
+    json.dump(dict(fwd=total, gap=gap, t=time.time()), open('/tmp/claude_dock_last.json', 'w'))
+    raise SystemExit(0)
+
 
 cmd = sys.argv[1]; args = sys.argv[2:]; dry = '--dry' in args; args = [a for a in args if a != '--dry']
 if '--wide' in args:
@@ -1478,6 +1771,9 @@ elif cmd in ('dock', 'redock'):
             raise SystemExit(0)
         if 'staging_pose' in st:   # pose tasks keep the start heading: turn to the face here (staging is clear all round)
             turn_to(math.radians(st.get('pose', st['staging_pose'])[2]))     # face the way the final pose faces
+        if (cmd == 'dock' and 'ref_gap' in st and 'pose' in st and os.path.exists(os.path.join(REF_DIR, name + '.npy'))
+                and not any(a in sys.argv for a in ('--lineup', '--stage-only', '--here'))):
+            dock_by_ref(name, st, gap, record='--record-bg' in sys.argv)
     m = measure() or measure(near=True)          # near: staging spots right beside the final pose
     if not m:
         raise SystemExit('ABORT: no face found ahead')
@@ -1491,13 +1787,15 @@ elif cmd in ('dock', 'redock'):
             sd = rel_target(st['pose'])                              # map: good to a few cm here
             rx, ry, ra = ref_offset(name, seed=sd)
             fwd0 = m['dist'] - FRONT - gap
-            if abs(rx - fwd0) <= 0.10 and abs(ry - sd[1]) <= 0.10:      # map good to ~5 cm here
+            # the map is good to ~5 cm here; the face is not (it can be another surface, and the taught pose need
+            # not sit at the face gap): reference and map must agree
+            if abs(rx - sd[0]) <= 0.10 and abs(ry - sd[1]) <= 0.10:
                 LAT_BIAS[0] = ry - face_dy; ref_lat = ry
                 log('lateral from the reference scan: %.3f m (face edge: %.3f, map: %.3f) - using the reference'
                     % (ry, face_dy, sd[1]))
             else:
-                log('reference match at the safe point not consistent (x %.3f vs face %.3f, y %.3f vs map %.3f) - '
-                    'lateral from the face edge' % (rx, fwd0, ry, sd[1]))
+                log('reference match at the safe point not consistent with the map (x %.3f vs %.3f, y %.3f vs %.3f; '
+                    'face x %.3f) - lateral from the face edge' % (rx, sd[0], ry, sd[1], fwd0))
         except SystemExit as e:
             log('reference match at the safe point failed (%s) - lateral from the face edge' % e)
     if jittered and '--lineup' not in sys.argv:
@@ -1569,10 +1867,14 @@ elif cmd in ('dock', 'redock'):
         if not dry:
             setmode(0)
         raise SystemExit(0)
+    has_ref = os.path.exists(os.path.join(REF_DIR, name + '.npy')) and not dry
     if '--closest' in sys.argv:
         # arm motion not fixed yet: go to the requested gap, or as close as the robot + arms + tray stay clear
         pw = RM.remove_self(cloud(), CFG); dy = lat_error(m, st, gap)
-        need_clear(RM.sweep_hits(pw, CFG, 0.0, dy), 'sideways move to the taught position')
+        if SURF[0] is None:                   # from the farthest view (see plan_approach); surface_filter needs it
+            SURF[0] = RM.surface_height(pw, m['dist'])
+        if not has_ref:
+            need_clear(RM.sweep_hits(pw, CFG, 0.0, dy), 'sideways move to the taught position')
         f0 = m['dist'] - FRONT - gap
         pw = accepted_filter(pw, st, f0, dy)
         ok = RM.max_forward(pw - np.array([0.0, dy, 0.0]), CFG, max(f0, 0.0))
@@ -1580,16 +1882,18 @@ elif cmd in ('dock', 'redock'):
             raise SystemExit('ABORT: already touching something ahead after the sideways move')
         if ok < f0 - 0.005:
             ok = max(0.0, ok - CLOSEST_SLACK)      # never plan exactly at the limit: the sideways move shifts things
-            log('requested gap %.3f is blocked -> will stop at gap %.3f (closest clear)' % (gap, m['dist'] - FRONT - ok))
+            why = RM.sweep_hits(pw - np.array([0.0, dy, 0.0]), CFG, f0, 0.0)
+            log('requested gap %.3f is blocked by %s -> will stop at gap %.3f (closest clear)'
+                % (gap, json.dumps(why), m['dist'] - FRONT - ok))
             gap = m['dist'] - FRONT - ok
     if '--lineup' in sys.argv:                                 # only the sideways move must be clear here
         need_clear(RM.sweep_hits(RM.remove_self(cloud(), CFG), CFG, 0.0, lat_error(m, st, gap)),
                    'sideways move to the taught position')
     else:
-        plan_approach(m, st, gap)                              # stops here if the taught approach is blocked
+        plan_approach(m, st, gap, sideways=not has_ref)        # stops here if the taught approach is blocked
     if os.path.exists(os.path.join(REF_DIR, name + '.npy')) and not dry and '--lineup' not in sys.argv:
-        # Fast path with a reference scan: ONE diagonal move (sideways + forward together) to STAGE2 before the
-        # final pose, re-measure, then ONE diagonal last move carrying the sideways correction from the scan
+        # Fast path with a reference scan, NO pure sideways moves: turn / straight / turn back to STAGE2 before the
+        # final pose on the station line, re-measure, then the last stage the same way with the lateral from the scan
         # match (on its own the chassis ignores sideways moves below ~2 cm - measured at D)
         dy = lat_error(m, st, gap); fwd = m['dist'] - FRONT - gap; total = 0.0
         if fwd < 0 or fwd > MAX_FWD:
@@ -1597,28 +1901,46 @@ elif cmd in ('dock', 'redock'):
         if fwd > STAGE2 + 0.15:
             first = fwd - STAGE2
             p = accepted_filter(RM.remove_self(cloud(), CFG), st, fwd, dy)
-            need_clear(RM.sweep_hits(p, CFG, 0.0, dy), 'sideways move to the station line')
-            need_clear(RM.sweep_hits(p - np.array([0.0, dy, 0.0]), CFG, first, 0.0), 'straight approach')
-            log('approach: sideways %.3f m, then forward %.3f m' % (dy, first))
-            if abs(dy) > 0.005:
-                rel(0.0, 0.0, y=dy)
-            rel(first + FWD_SHORT, 0.0); total += first + FWD_SHORT
+            if abs(dy) > SLANT_TOL:
+                # no sideways move (2026-11-16, user): turn towards the stage-2 point on the line, straight, turn back
+                a, d = slant_plan(dy, first, p, 'approach to stage 2')
+                slant_move(a, d, FWD_SHORT, 'approach to stage 2')
+            else:
+                need_clear(RM.sweep_hits(p, CFG, first, 0.0), 'straight approach')
+                log('approach: forward %.3f m (sideways %.3f m left alone)' % (first, dy))
+                rel(first + FWD_SHORT, 0.0)
+            total += first + FWD_SHORT
             m = measure_station(st, gap, m['dist'] - first)
             log('  stage 2 measure', pub(m))
         # from here on the sideways position comes from the reference scan only: close to D the face end jumps
         # between pieces (2026-11-16: -0.06 m at the safe point, +0.20 m at stage 2 -> a planned 0.47 m sideways
         # move, stopped by the clearance check)
-        rx, ry, ra = ref_offset(name)
-        plan_approach(m, st, gap, dy=ry)
+        # seeded with the map: without the first stage (short approach, e.g. a gap cut back by --closest) the
+        # robot is still ~0.4 m out and an unseeded match lands in a wrong minimum (2026-11-16: 9% matched)
+        seed = rel_target(st['pose']) if 'pose' in st else None
+        rx, ry, ra = ref_offset(name, seed=seed)
+        plan_approach(m, st, gap, dy=ry, sideways=False)
         if abs(ra) > math.radians(1.0):
             need_clear(RM.turn_hits(accepted_filter(RM.remove_self(cloud(), CFG), st, rx, ry), CFG, ra), 'heading correction')
             rel(0.0, ra)
             m = measure_station(st, gap, m['dist']); rx, ry, ra = ref_offset(name)
         fwd = m['dist'] - FRONT - gap
-        sideways_small(ry, st, fwd)
-        need_clear(RM.sweep_hits(accepted_filter(RM.remove_self(cloud(), CFG), st, fwd, 0.0), CFG, fwd, 0.0), 'last stage')
-        log('last stage: forward %.3f m' % fwd)
-        rel(fwd + FWD_SHORT_LAST, 0.0); total += fwd + FWD_SHORT_LAST
+        slant = None
+        if abs(ry) > SLANT_TOL:
+            try:
+                slant = slant_plan(ry, fwd, accepted_filter(RM.remove_self(cloud(), CFG), st, fwd, ry), 'last stage')
+            except SystemExit as e:
+                log('last stage: slanted path not clear (%s) - sideways correction instead' % e)
+                sideways_small(ry, st, fwd)
+        elif abs(ry) >= 0.008:
+            log('last stage: sideways %.3f m left alone (<= %.3f)' % (ry, SLANT_TOL))
+        if slant:
+            slant_move(slant[0], slant[1], FWD_SHORT_LAST, 'last stage')
+        else:
+            need_clear(RM.sweep_hits(accepted_filter(RM.remove_self(cloud(), CFG), st, fwd, 0.0), CFG, fwd, 0.0), 'last stage')
+            log('last stage: forward %.3f m' % fwd)
+            rel(fwd + FWD_SHORT_LAST, 0.0)
+        total += fwd + FWD_SHORT_LAST
         total += final_forward_fix(name, st)
         YLIM[0] = 2.5; f = measure(near=True)
         res = dict(name=name, gap_target=gap, gap=f['gap'] if f else None, ang_deg=f['ang_deg'] if f else None, fwd=round(fwd, 4))

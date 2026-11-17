@@ -25,6 +25,8 @@
 #                         verified clear on site -> docking ignores exactly those points
 #   restage NAME          NO MOTION: recompute the staging spot of a taught station from here (robot near it)
 #   lineup NAME           DRIVE: like goto, but stop lined up in front of NAME before driving in  (asks y/n)
+#   record-bg NAME        DRIVE: goto NAME that also records its background (then only NEW objects block) (asks y/n)
+#   bg-clear NAME         NO MOTION: forget NAME's recorded background
 #   undock                DRIVE: reverse straight out along the last docking approach              (asks y/n)
 #   job        job status JSON (what the skye_task adapter reads)
 #   task [args]    START THE FULL TASK on the Orin (arms + navigation, in tmux)       (MOVES, asks y/n)
@@ -73,6 +75,8 @@ switch ($Cmd) {
     'teach-waypoint' { ssh chassis "$remote teach-waypoint $Arg $($Rest -join ' ')" }
     'waypoints' { ssh chassis "$remote waypoints" }
     'restage'  { ssh chassis "$remote restage $Arg $($Rest -join ' ')" }
+    'bg-clear' { ssh chassis "$remote bg-clear $Arg" }
+    'record-bg' { Confirm-Motion "dock at $Arg and record its background (belt in front EMPTY, nobody in front)"; ssh -t chassis "$remote record-bg $Arg && $remote follow" }
     'lineup'   { Confirm-Motion "line up in front of station $Arg (not driving in)"; ssh -t chassis "$remote lineup $Arg && $remote follow" }
     'undock'   { Confirm-Motion "reverse straight out of the last docking"; ssh -t chassis "$remote undock && $remote follow" }
     'teach'    { Confirm-Motion "teach station $Arg at the current lateral position (turns a little)"; ssh chassis "$remote teach $Arg" }

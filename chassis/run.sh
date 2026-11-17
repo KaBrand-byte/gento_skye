@@ -26,6 +26,10 @@
 #                           touches there as verified-clear (on site); docking ignores exactly those points
 #   run.sh restage NAME [BACK]  NO MOTION: recompute the staging spot of a taught station from the current scan
 #   run.sh lineup NAME      like goto, but stop lined up in front of NAME before driving in (e.g. for accept)  (MOVES)
+#   run.sh record-bg NAME   supervised goto NAME (direct route) that also records the station's BACKGROUND at the
+#                           safe point, stage 2 and the final pose: afterwards only NEW objects block the docking.
+#                           Place zone (belt in front) must be EMPTY, nobody in front of the robot      (MOVES)
+#   run.sh bg-clear NAME    NO MOTION: forget NAME's recorded background (backup kept)
 #   run.sh undock [MIN]     reverse straight out along the last docking approach (>= MIN m, 0.30)    (MOVES)
 #   run.sh selfscan         measure arms/tray with the lidar and store them (no motion)
 #   run.sh check NAME       what docking at NAME would do from here (no motion)
@@ -77,6 +81,11 @@ case "$1" in
   lineup)   [ -z "$2" ] && { echo "usage: lineup NAME"; exit 1; }
             start "$2" timeout 500 python3 dock.py dock "$2" --leave --closest --lineup ;;
   undock)   start undock timeout 90 python3 dock.py undock $(num "$2" '') ;;
+  record-bg) [ -z "$2" ] && { echo "usage: record-bg NAME"; exit 1; }
+            start "$2" timeout 650 python3 dock.py dock "$2" --leave --closest --via none --record-bg ;;
+  bg-clear) [ -z "$2" ] && { echo "usage: bg-clear NAME"; exit 1; }
+            f="refs/$2_bg.npy"; [ -f "$f" ] || { echo "no background recorded for $2"; exit 0; }
+            mv "$f" "$f.bak-$(date +%H%M%S)" && echo "background of $2 removed (backup $f.bak-*)" ;;
   teach-pose) [ -z "$2" ] && { echo "usage: teach-pose NAME [BACK] [left|right]"; exit 1; }
             timeout 90 python3 dock.py teach-pose "$2" $(num "$3" 0.5) ${4:+"$4"} ;;
   demo-dry) timeout 120 python3 dock.py dock D $(num "$2" 0.25) --leave --here --closest --dry ;;
