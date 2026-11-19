@@ -769,6 +769,7 @@ def nav_task(st, pose=None):
     if res is None:
         raise SystemExit('ABORT: navigation service did not answer')
     command_sent('navigation task'); NAV_WATCH[0] = MotionWatch('navigation task (vendor path planning + start)')
+    NAV_ACTIVE[0] = True                        # cancelled on any abort / crash until wait_task saw it end
     return 'task %d %d %s (speed %.2f m/s)' % (res.task_id, res.error_code, res.error_msg, NAV_SPEED)
 
 
@@ -1290,6 +1291,45 @@ def unjitter(st, why):
     translate(dx, dy)
 
 
+def safe_stop(why, moves=True):
+    """Cancel relative moves (moves=True) and vendor navigation tasks, soft manual: after any abort or crash
+    the vendor navigation must not drive on unsupervised (2026-11-19: a crash left it driving towards T)."""
+    try:
+        from action_msgs.srv import CancelGoal
+        if moves:
+            c = n.create_client(CancelGoal, 'move/MoveRelativeCmd/_action/cancel_goal')
+            if c.wait_for_service(timeout_sec=3):
+                f = c.call_async(CancelGoal.Request()); rclpy.spin_until_future_complete(n, f, timeout_sec=3)
+        cancel_all_tasks()
+        setmode(1)
+        log('SAFETY: %s - navigation tasks%s cancelled, soft manual' % (why, ' and relative moves' if moves else ''))
+    except Exception as e:                      # never mask the original error
+        log('SAFETY: stopping after "%s" failed: %r - use gento stop / the e-stop' % (why, e))
+
+
+def _crash(kind, value, tb):
+    import traceback
+    traceback.print_exception(kind, value, tb); sys.stdout.flush()
+    if MOTION_JOB[0] or NAV_ACTIVE[0]:
+        CRASHED[0] = True
+    print('ABORT: internal error %s: %s' % (kind.__name__, value), flush=True)
+
+
+def _at_exit():
+    if CRASHED[0]:
+        safe_stop('internal error')
+    elif NAV_ACTIVE[0]:                         # an ABORT while the vendor navigation was still running
+        safe_stop('job ended during the navigation', moves=False)
+
+
+NAV_ACTIVE = [False]       # a vendor navigation task was started and not yet seen finished
+CRASHED = [False]
+if __name__ == '__main__':                  # the job itself (not the tests that load these definitions)
+    import atexit
+    sys.excepthook = _crash
+    atexit.register(_at_exit)               # after rclpy.init(): runs before anything rclpy registered
+
+
 def cancel_all_tasks():
     from server.srv import CancelAllTask
     c = n.create_client(CancelAllTask, 'server/CancelAllTask')
@@ -1333,6 +1373,7 @@ class NavTrace:
 
 
 NEAR_STOP = 0.15        # m: this close to a safe point / waypoint the navigation is stopped (arrived)
+HTTP_LOST = 30.0        # s: the vendor task list not answering this long ends the job (navigation cancelled)
 NEAR_DWELL = 3.0        # s: this long within STAGING_TOL (manoeuvring around it) also counts as arrived
 
 
@@ -1347,12 +1388,25 @@ def wait_task(tmo=150, near=None, tol=STAGING_TOL):
         rclpy.spin_once(n, timeout_sec=0.05)
         if mw:
             mw.poll()
-    zone = None
+    zone = None; silent = None
     while time.time() - t0 < tmo:
         q = urllib.request.Request('http://127.0.0.1:8080/api/Task/GetAllTask', data=b'{}',
                                    headers={'Content-Type': 'application/json'})
-        if not json.load(urllib.request.urlopen(q, timeout=5))['Content']:
-            tr.summary(); return True
+        # the vendor server once took > 5 s to answer on the loaded chassis (2026-11-19, load 15): the timeout
+        # killed this job, and the navigation drove on unsupervised - go on by position, give up only after a while
+        try:
+            tasks = json.load(urllib.request.urlopen(q, timeout=5))['Content']
+        except (OSError, ValueError, KeyError, TypeError) as e:
+            if silent is None:
+                silent = time.time(); log('vendor task list did not answer (%s): going on by position' % e)
+            if time.time() - silent > HTTP_LOST:
+                raise SystemExit('ABORT: the vendor navigation server has not answered for %.0f s' % HTTP_LOST)
+            tasks = True
+        else:
+            if silent is not None:
+                log('vendor task list answers again after %.1f s' % (time.time() - silent)); silent = None
+        if not tasks:
+            NAV_ACTIVE[0] = False; tr.summary(); return True
         if mw:
             mw.poll()
         tr.add()
@@ -1363,16 +1417,16 @@ def wait_task(tmo=150, near=None, tol=STAGING_TOL):
             dd = math.hypot(x - near[0], y - near[1])
             if dd < tol and time.time() - still > 1.5:
                 log('arrived %.3f m from staging but the server keeps the task open: cancelling it' % dd)
-                tr.summary(); cancel_all_tasks(); return True
+                tr.summary(); cancel_all_tasks(); NAV_ACTIVE[0] = False; return True
             # the safe point is only a place to turn: the vendor otherwise keeps manoeuvring onto the exact pose
             # (2026-11-16 at D: 22 s of reversing and turning within 0.3 m of it)
             if dd < NEAR_STOP:
                 log('within %.2f m of the safe point: navigation stopped there' % dd)
-                cancel_all_tasks(); spin(0.5); tr.summary(); return True
+                cancel_all_tasks(); NAV_ACTIVE[0] = False; spin(0.5); tr.summary(); return True
             zone = (zone or time.time()) if dd < tol else None
             if zone and time.time() - zone > NEAR_DWELL:
                 log('%.0f s within %.2f m of the safe point (%.2f m now): navigation stopped there' % (NEAR_DWELL, tol, dd))
-                cancel_all_tasks(); spin(0.5); tr.summary(); return True
+                cancel_all_tasks(); NAV_ACTIVE[0] = False; spin(0.5); tr.summary(); return True
         for _ in range(4):
             rclpy.spin_once(n, timeout_sec=0.05)
             if mw:
