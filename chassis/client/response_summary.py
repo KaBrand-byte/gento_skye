@@ -12,12 +12,17 @@ Prints the summary block (put at the top of the run log) and appends one line pe
 overwritten).  --offset: Orin clock minus chassis clock (s), to show the Orin time as well.
 New dock.py logs carry "RESPONSE: ..." lines with epoch timestamps; older ones are reconstructed from the
 "INPUT ready" / "COMMAND accepted" lines (time of day only).
+
+Also saves a four-line report in response_times/ next to the run log.  This report measures from the start
+of the first point cloud capture to the first chassis command and shows both timestamps on the Orin clock.
 """
 import argparse
+import math
 import os
 import re
 import sys
 import time
+from pathlib import Path
 
 LIMIT_MS = 1200
 JOB = re.compile(r'^===== (\d\d:\d\d:\d\d) .*dock\.py (\S+(?: [A-Z0-9]+)?)')
@@ -102,6 +107,24 @@ def summary(res, offset=None, name='', place='D'):
     return '\n'.join(out)
 
 
+def orin_epoch(t, offset):
+    return '%.3f' % (t + offset) if t is not None and offset is not None else '不可用'
+
+
+def scan_summary(f, offset=None):
+    scan_ms = float(f['scan_ms']) if f else math.nan
+    has_interval = math.isfinite(scan_ms) and scan_ms >= 0
+    t_cmd = f['t_cmd'] if f else None
+    t_scan = t_cmd - scan_ms / 1000 if t_cmd is not None and has_interval else None
+    meets_limit = '是' if has_interval and scan_ms < LIMIT_MS else '否'
+    return '\n'.join([
+        '首次环境信息输入：%s' % orin_epoch(t_scan, offset),
+        '首次输出指令：%s' % orin_epoch(t_cmd, offset),
+        '时间间隔：%s' % ('%.0f ms' % scan_ms if has_interval else '无法统计'),
+        '是否满足1.2s的要求：%s' % (meets_limit if has_interval else '无法判定'),
+    ])
+
+
 def main(argv=None):
     p = argparse.ArgumentParser()
     p.add_argument('log')
@@ -110,7 +133,8 @@ def main(argv=None):
     p.add_argument('--name', default='')
     p.add_argument('--place', default='D')
     a = p.parse_args(argv)
-    with open(a.log, encoding='utf-8', errors='replace') as fh:
+    log = Path(a.log)
+    with log.open(encoding='utf-8', errors='replace') as fh:
         res = parse(fh)
     print(summary(res, a.offset, a.name, a.place))
     f = pick(res, a.place)
@@ -124,6 +148,10 @@ def main(argv=None):
                 a.name or os.path.basename(a.log), f['in_s'], '%.3f' % f['t_in'] if f['t_in'] else '', f['cmd_s'],
                 '%.3f' % f['t_cmd'] if f['t_cmd'] else '', f['ms'], 'OK' if f['ms'] < LIMIT_MS else 'OVER',
                 f['command'].replace(',', ' ')))
+    report_dir = log.parent / 'response_times'
+    report_dir.mkdir(exist_ok=True)
+    report_path = report_dir / log.name.removesuffix('.part')
+    report_path.write_text(scan_summary(f, a.offset) + '\n', encoding='utf-8')
     return 0
 
 

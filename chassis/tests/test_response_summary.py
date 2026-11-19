@@ -7,6 +7,7 @@ import sys
 import tempfile
 import unittest
 from contextlib import redirect_stdout
+from pathlib import Path
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -86,6 +87,38 @@ class ResponseSummaryTest(unittest.TestCase):
 
     def test_no_chassis_log(self):
         self.assertIn('无法统计', RS.summary(RS.parse(['===== 2026-11-17 gento task\n', 'hello\n'])))
+
+    def test_scan_summary_is_saved_next_to_task_log(self):
+        log = Path(self.tmp) / 'task-test-c02.log.part'
+        log.write_text(OLD_LOG.replace(
+            '[20:39:42.349    6.9s] COMMAND accepted:',
+            'RESPONSE: first lidar input 1001.100 (20:39:42.235) -> first chassis command 1001.200 (20:39:42.349) '
+            '= 100 ms (limit 1200 ms) OK | command: move x 0.594 | from the scan start 1200 ms\n'
+            '[20:39:42.349    6.9s] COMMAND accepted:',
+        ), encoding='utf-8')
+        with redirect_stdout(io.StringIO()) as out:
+            RS.main([str(log), '--offset', '-0.250'])
+        self.assertIn('100 ms  →  合格', out.getvalue())
+        report = Path(self.tmp) / 'response_times' / 'task-test-c02.log'
+        self.assertEqual(report.read_text(encoding='utf-8').splitlines(), [
+            '首次环境信息输入：999.750',
+            '首次输出指令：1000.950',
+            '时间间隔：1200 ms',
+            '是否满足1.2s的要求：否',
+        ])
+
+    def test_scan_summary_handles_missing_timestamps_and_events(self):
+        old_log = RS.pick(RS.parse(OLD_LOG.splitlines()))
+        self.assertEqual(RS.scan_summary(old_log, 0).splitlines(), [
+            '首次环境信息输入：不可用',
+            '首次输出指令：不可用',
+            '时间间隔：826 ms',
+            '是否满足1.2s的要求：是',
+        ])
+        self.assertEqual(RS.scan_summary(None).splitlines()[-2:], [
+            '时间间隔：无法统计',
+            '是否满足1.2s的要求：无法判定',
+        ])
 
 
 if __name__ == '__main__':
