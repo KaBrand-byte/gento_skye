@@ -1,0 +1,9 @@
+[Unit]
+Description=Make sure the Gento vendor watchdog is running 60 s after boot
+
+[Timer]
+OnBootSec=60
+Unit=gento-vendor-watchdog.service
+
+[Install]
+WantedBy=timers.target
