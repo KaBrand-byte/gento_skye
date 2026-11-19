@@ -34,6 +34,8 @@
 #                  handover where it stands: Enter closes the grippers, 1 = held, go / 0 = not right (grippers open, put it right) -> D -> place -> T
 #                  args e.g. --cycles 10 | --down-mm 120 | --holding | --no-return | --handover (drive to T first) | --finish-place 135 (place stopped at D: release, retract, back to T)
 #                  --random-route: also a random spot near the safe points (waypoints are random by default)
+#                  --resume: go on with a task that was stopped or died: tray still held -> to the place station,
+#                  already placed -> back to the start station (runs/task_progress.json on the Orin)
 #   task-attach    show the running task again (Ctrl-b d detaches; the task keeps running)
 #   task-stop      stop the task (arms + chassis) and software-stop the chassis
 #   task-check     no motion: task config + SDK version on the Orin

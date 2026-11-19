@@ -329,6 +329,10 @@ class GentoNavigation:
         Needs nothing else within ~1 m in front of the robot; arms in the carry pose."""
         return self._query(90.0, cmd="selfscan")
 
+    def relocate(self):
+        """No motion: relocalise (scan matched to the whole map, applied when good); the chassis' report."""
+        return self._query(340.0, cmd="relocate")
+
     def check(self, destination):
         """No motion: report what docking at `destination` would do from the current pose."""
         return self._query(120.0, cmd="check", station=destination)

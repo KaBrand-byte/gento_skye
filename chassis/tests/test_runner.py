@@ -21,6 +21,7 @@ runner.LINK_RELEASE_S = 0.0
 from gento_navigation import NavigationError  # noqa: E402
 from test_sequence import Device  # noqa: E402  (skye_task's offline robot double)
 from skye_task.sdk import MotionError  # noqa: E402
+from skye_task.config import load_config  # noqa: E402
 
 
 class OfflineDevice(Device):
@@ -156,6 +157,50 @@ class LinkLostNav(FakeNav):
 
     def chassis_health(self):
         return {"state": "ok", "ok_since": 1}
+
+
+class FailingNav(FakeNav):
+    """The leg to `where` fails `times` times with `error` (the job ends failed), then works."""
+    where, times, error = "D", 1, "ABORT: internal error TimeoutError: timed out"
+
+    def __init__(self, **kw):
+        super().__init__(**kw); self.fails = 0
+
+    def raise_if_failed(self):
+        if self.active == self.where and self.fails < self.times and self.count > 1:
+            self.fails += 1
+            raise NavigationError(self.error)
+
+    def is_arrived_and_stopped(self):
+        self.count += 1
+        return self.count > 2 and (self.active != self.where or self.fails >= self.times)
+
+    def relocate(self):
+        FakeNav.log.append(("relocate",)); return '{"match": 0.95}'
+
+
+class CrashOnceNav(FailingNav):
+    pass
+
+
+class ManualSwitchNav(FailingNav):
+    error = "ABORT: hard switch is on MANUAL - switch it to AUTO first"
+
+
+class AlwaysFailNav(FailingNav):
+    times, error = 99, "exit code 1"
+
+
+class LocalisationNav(FailingNav):
+    error = "ABORT: localisation looks wrong (match 0.36 < 0.60) - relocalise first"
+
+
+class UndockFailNav(FailingNav):
+    where, error = "undock", "exit code 1"
+
+
+class ReturnFailNav(FailingNav):
+    where, times, error = "T", 99, "ABORT: unknown station T"
 
 
 class BlockedLongNav(FakeNav):
@@ -507,14 +552,14 @@ class RunnerTests(unittest.TestCase):
         import io
         from contextlib import redirect_stdout
         out = io.StringIO()
-        with redirect_stdout(out):
-            code, report = self.run_trial(fail_on="undock")
+        with redirect_stdout(out), mock.patch.object(runner, "RETRY_PAUSE", 0.0):
+            code, report = self.run_trial(fail_on="T")          # (a failed undock now goes on to T)
         self.assertIn("放置成功，但返回 T 失败", out.getvalue())          # not just "(completed)"
         self.assertIn("返回 T failed", out.getvalue())
         self.assertEqual(code, 1)
         self.assertEqual(report["status"], "completed")
         self.assertEqual(report["metadata"]["return_status"], "failed")
-        self.assertIn(("stop", "undock"), FakeNav.log)
+        self.assertIn(("stop", "T"), FakeNav.log)
 
     def test_blocked_docking_waits_and_retries_by_itself(self):
         with mock.patch.object(runner, "BLOCK_PAUSE", 0.0),              mock.patch.object(runner, "wait_for_start", side_effect=AssertionError("no Enter")):
@@ -570,6 +615,75 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("升降没有上线", report.get("error", ""))
         self.assertNotIn("forward", [s["name"] for s in report["steps"]])
+
+    def starts(self):
+        return [e[1] for e in FakeNav.log if e[0] == "start"]
+
+    def progress(self):
+        return json.loads((Path(self.tmp.name) / "task_progress.json").read_text(encoding="utf-8"))["phase"]
+
+    def test_crashed_leg_is_retried_after_a_stop(self):
+        with mock.patch.object(runner, "RETRY_PAUSE", 0.0):
+            code, report = self.run_trial(nav_cls=CrashOnceNav)
+        self.assertEqual(code, 0)
+        self.assertEqual(self.starts(), ["D", "D", "undock", "T"])
+        self.assertIn(("stop", "D"), FakeNav.log)
+        d = [l for l in report["metadata"]["navigation_legs"] if l["destination"] == "D"][0]
+        self.assertEqual(d.get("retries"), 1)
+        self.assertEqual(self.progress(), "done")
+
+    def test_reasons_a_retry_cannot_fix_stop_at_once(self):
+        with mock.patch.object(runner, "RETRY_PAUSE", 0.0):
+            code, report = self.run_trial(nav_cls=ManualSwitchNav)
+        self.assertEqual(code, 1); self.assertEqual(self.starts(), ["D"])
+        self.assertEqual(self.progress(), "to_place")                    # --resume would go on from here
+
+    def test_retries_are_limited(self):
+        with mock.patch.object(runner, "RETRY_PAUSE", 0.0):
+            code, report = self.run_trial(nav_cls=AlwaysFailNav)
+        self.assertEqual(code, 1); self.assertEqual(self.starts(), ["D"] * (1 + runner.LEG_RETRIES))
+
+    def test_localisation_failure_relocalises_before_the_retry(self):
+        with mock.patch.object(runner, "RETRY_PAUSE", 0.0):
+            code, report = self.run_trial(nav_cls=LocalisationNav)
+        self.assertEqual(code, 0)
+        i = FakeNav.log.index(("relocate",))
+        self.assertEqual(FakeNav.log[i + 1], ("start", "D"))
+
+    def test_unfinished_undock_goes_on_to_the_start_station(self):
+        with mock.patch.object(runner, "RETRY_PAUSE", 0.0):
+            code, report = self.run_trial(nav_cls=UndockFailNav)
+        self.assertEqual(code, 0); self.assertEqual(self.starts(), ["D", "undock", "T"])
+        self.assertIsNone(report["metadata"].get("return_status"))
+
+    def test_resume_after_the_way_back_failed(self):
+        with mock.patch.object(runner, "RETRY_PAUSE", 0.0):
+            code, report = self.run_trial(nav_cls=ReturnFailNav)
+        self.assertEqual(code, 1); self.assertEqual(self.progress(), "returning")
+        FakeNav.log = []
+        receive = load_config(self.cfg).receive
+        code, report = self.run_trial(extra=["--resume"], arms=receive)
+        self.assertEqual(code, 0)
+        self.assertEqual(self.starts(), ["T"])                          # no handover, no place, no undock
+        self.assertNotIn("forward", [s["name"] for s in report["steps"]])
+        self.assertEqual(self.progress(), "done")
+
+    def test_resume_with_the_tray_still_held_goes_to_the_place_station(self):
+        with mock.patch.object(runner, "RETRY_PAUSE", 0.0):
+            code, report = self.run_trial(nav_cls=ManualSwitchNav)
+        self.assertEqual(self.progress(), "to_place")
+        FakeNav.log = []
+        receive = load_config(self.cfg).receive
+        code, report = self.run_trial(extra=["--resume"], arms=receive, answers=())
+        self.assertEqual(code, 0); self.assertEqual(self.starts(), ["D", "undock", "T"])
+
+    def test_resume_refuses_a_place_stopped_half_way_and_a_finished_task(self):
+        (Path(self.tmp.name) / "task_progress.json").write_text('{"phase": "placing"}', encoding="utf-8")
+        code, report = self.run_trial(extra=["--resume"])
+        self.assertEqual(code, 1); self.assertIn("--finish-place", report.get("error", "")); self.assertEqual(self.starts(), [])
+        (Path(self.tmp.name) / "task_progress.json").write_text('{"phase": "done"}', encoding="utf-8")
+        code, report = self.run_trial(extra=["--resume"])
+        self.assertEqual(code, 1); self.assertIn("已经完成", report.get("error", ""))
 
     def test_other_docking_failures_still_stop(self):
         code, report = self.run_trial(fail_on="D")

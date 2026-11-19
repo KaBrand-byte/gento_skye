@@ -4,7 +4,8 @@ system with STANDARD messages only (no vendor message packages needed on the cli
 
   /gento_dock/cmd     std_msgs/String  JSON {"id": "...", "cmd": "goto", "station": "T", "gap": 0.30}
                                        cmds: goto (station; gap, via, jitter optional) | undock | stop |
-                                             tune (station, key, value) | selfscan | check (station)
+                                             tune (station, key, value) | selfscan | check (station) |
+                                             relocate (no motion: scan matched to the whole map, applied)
   /gento_dock/status  std_msgs/String  JSON, 2 Hz, transient-local (late joiners get the last one):
                       {"job": {...job_status.json...}, "ack": {"id", "ok", "out"}, "pose": [x, y, yaw_deg], "t": ...,
                        "vendor": {...vendor_watchdog.json...} or null when the watchdog is not installed}
@@ -92,12 +93,14 @@ class Bridge(Node):
             args = ['selfscan']
         elif c.get('cmd') == 'check':               # no motion: what docking at a station would do from here
             args = ['check', str(c['station'])]
+        elif c.get('cmd') == 'relocate':            # no motion: relocalise (the task does it before a retry)
+            args = ['relocate']
         else:
             self.ack = {'id': cid, 'ok': False, 'out': 'unknown command: %s' % msg.data}; self.publish(); return
         self.get_logger().info('cmd %s: %s' % (cid, ' '.join(args)))
 
         def run():
-            r = subprocess.run(RUN + args, capture_output=True, text=True, timeout=150)
+            r = subprocess.run(RUN + args, capture_output=True, text=True, timeout=330 if args[0] == 'relocate' else 150)
             out = (r.stdout + r.stderr).strip()
             ok = r.returncode == 0 and 'BUSY' not in out and 'unknown station' not in out
             self.ack = {'id': cid, 'ok': ok, 'out': out[-400:]}; self.publish()

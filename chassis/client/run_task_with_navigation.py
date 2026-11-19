@@ -29,6 +29,7 @@ import argparse
 from copy import deepcopy
 import dataclasses
 from datetime import datetime, timezone
+import json
 import logging
 import math
 import os
@@ -44,6 +45,22 @@ RANDOM_ROUTE_JITTER = 0.08  # m: --random-route, random spot within this of the 
 BLOCK_PAUSE = 2.0          # s: docking blocked (the chassis already waited 30 s): pause, then check again
 RECOVER_TIMEOUT = 20 * 60  # s: wait this long for the chassis to recover (vendor programs restarted, link back)
 VENDOR_MARKS = ("vendor chassis programs", "VENDOR DOWN", "job died")
+
+
+LEG_RETRIES = 2            # a chassis leg that failed for a reason a fresh attempt can fix: run it again this often
+RETRY_PAUSE = 3.0          # s between stopping the chassis and the next attempt
+NO_RETRY = ("hard switch", "MANUAL", "unknown station", "stopped by user", "BUSY")      # retrying cannot help
+LOCALISATION = ("localisation looks wrong", "check localisation", "by the map before the scan match",
+                "reference match says")
+
+
+def retry_kind(text):
+    """'relocate': a localisation problem (relocalise, then try again); 'retry': any other chassis job failure
+    a fresh attempt may get past (crash, vendor API not answering, safe point not reached, ...); None: never."""
+    text = str(text or "")
+    if any(mark in text for mark in NO_RETRY):
+        return None
+    return "relocate" if any(mark in text for mark in LOCALISATION) else "retry"
 
 
 def chassis_trouble(text):
@@ -105,6 +122,40 @@ class Trial:
         self.sequence = None
         self.gripper = None
         self._sdk = None
+
+    # ------------------------------------------------------------------ progress (for --resume)
+    PHASES = {"to_place": "托盘已夹好，去放置点", "placing": "放置动作中", "placed": "已放置，双臂回到运输位",
+              "returning": "返回起始点途中", "done": "已完成"}
+
+    def progress_file(self):
+        return Path(self.args.result).parent / "task_progress.json"
+
+    def save_progress(self, phase):
+        """Where the task is, so a task stopped or killed on the way can go on with --resume."""
+        try:
+            f = self.progress_file(); f.parent.mkdir(parents=True, exist_ok=True)
+            tmp = f.with_suffix(".tmp")
+            tmp.write_text(json.dumps({"phase": phase, "start": self.args.start, "place": self.args.place,
+                                       "t": datetime.now().isoformat(timespec="seconds")}, ensure_ascii=False))
+            os.replace(tmp, f)
+        except OSError as error:
+            logging.warning("任务进度没写上（不影响本次运行）: %s", error)
+
+    def resume_phase(self):
+        """--resume: what the stopped task still has to do ('to_place' | 'return'), checked before any motion."""
+        try:
+            p = json.loads(self.progress_file().read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            raise MotionError("--resume：找不到上一次任务的进度（runs/task_progress.json），请正常开始任务")
+        phase = p.get("phase")
+        logging.info("--resume：上一次任务停在“%s”（%s）", self.PHASES.get(phase, phase), p.get("t"))
+        if phase == "to_place":
+            return "to_place"
+        if phase in ("placed", "returning"):
+            return "return"
+        if phase == "placing":
+            raise MotionError("--resume：上一次停在放置动作中途（双臂可能还在下面）：先用 --finish-place 135 松爪、收回双臂并回起始点")
+        raise MotionError("--resume：上一次任务已经完成，没有需要继续的部分")
 
     @staticmethod
     def arm_start(config):
@@ -539,7 +590,21 @@ class Trial:
                 # we are and retry by ourselves until it is gone - no Enter (2026-11-18/19: a basket left on the
                 # belt; the operator had to clear it and press Enter).  Ctrl-C stops as always.
                 if undock or "BLOCKED" not in str(error):
-                    raise
+                    if undock and retry_kind(error):    # reversing out did not finish: the leg to the start
+                        logging.warning("倒车退出没有完成（%s）：跳过，直接去 %s（那一段会先退回安全点）",
+                                        error, self.args.start)
+                        self.stop_chassis_quietly()
+                        leg.update(status="skipped", error=str(error))
+                        self.navigating = False
+                        return
+                    kind = retry_kind(error)
+                    if not kind or leg.get("retries", 0) >= LEG_RETRIES:
+                        raise
+                    leg["retries"] = leg.get("retries", 0) + 1
+                    self.navigating = False
+                    self.retry_leg(destination, error, kind, leg["retries"])
+                    self.navigating = True; begin = time.monotonic()
+                    continue
                 retries += 1
                 blocked_since = blocked_since or begin
                 self.navigating = False
@@ -568,6 +633,34 @@ class Trial:
         leg.update(status="arrived", seconds=round(time.monotonic() - begin, 1), final=status.get("final"),
                    pose=nav.pose())
         logging.info("已到站并停稳: %s %s", destination, status.get("final"))
+
+    def stop_chassis_quietly(self):
+        """Software-stop the chassis before another attempt (its own job already stopped what it started)."""
+        try:
+            self.nav.stop()
+        except Exception as error:
+            logging.warning("重试前停止底盘失败（继续）: %s", error)
+
+    def retry_leg(self, destination, error, kind, attempt):
+        """A chassis leg failed for a reason a fresh attempt may get past: stop the chassis, wait until it is
+        healthy (watchdog) - relocalise first for a localisation problem - and run the leg again."""
+        seq, nav = self.sequence, self.nav
+        print(chr(7), flush=True)
+        logging.warning("去 %s 失败（%s），自动重试 %d/%d", destination, error, attempt, LEG_RETRIES)
+        self.stop_chassis_quietly()
+        pause = time.monotonic()
+        while time.monotonic() - pause < RETRY_PAUSE:
+            seq.checked_feedback(); time.sleep(self.args.poll)
+        health = getattr(nav, "chassis_health", lambda: None)()
+        if health and health.get("state") not in ("ok", "absent", None):
+            self.wait_for_chassis(destination, destination, error, "vendor")
+        if kind == "relocate" and hasattr(nav, "relocate"):
+            logging.info("定位有问题：先自动重定位")
+            try:
+                logging.info("重定位结果: %s", str(nav.relocate()).strip().splitlines()[-1:] or "")
+            except Exception as relocate_error:
+                logging.warning("自动重定位失败（照样重试）: %s", relocate_error)
+        self._restart_leg(destination, False)
 
     def stop_chassis(self):
         if self.navigating and self.nav is not None:
@@ -608,8 +701,21 @@ class Trial:
         old = {s: signal.signal(s, lambda *_: self.sequence.request_stop()) for s in (signal.SIGINT, signal.SIGTERM)}
         exit_code = 1
         try:
+            resume = self.resume_phase() if a.resume else None
+            if resume == "to_place":
+                logging.info("--resume：托盘还夹着，直接去放置点（同 --holding）")
+                a.holding, a.handover = True, False
             if a.finish_place is not None:                  # a place stopped with the arms down: finish it
                 self.finish_interrupted_place(a.finish_place)
+                self.save_progress("placed")
+            elif resume == "return":                        # placed already: only the way back is left
+                start_pose = self.arm_start(config)
+                if start_pose not in ("carry", "carry_wrist"):
+                    raise MotionError("--resume：双臂不在运输位，不能直接返回")
+                self.attach_at_carry(wrists=start_pose == "carry_wrist")
+                result.status = "completed"
+                result.metadata["resumed_from"] = "placed"
+                logging.info("--resume：已放置过，直接返回 %s（那一段会先退出放置点）", a.start)
             else:
                 start_pose = self.arm_start(config)             # before any motion
                 if a.holding and start_pose == "prepare":
@@ -638,10 +744,18 @@ class Trial:
                         if start_pose != "prepare" and self.gripper is not None:
                             self.sequence._gripper_action("open_before_receive", GripperAction.OPEN)
                     self.handover(f"{prefix}交接托盘（就在当前位置，双臂在运输位不动）。")
+                self.save_progress("to_place")
                 self.navigate(a.place)
+                self.save_progress("placing")
                 self.place_and_back_to_carry()                  # forward, down, open, up, back -> carry pose
+                self.save_progress("placed")
             if a.start and not a.no_return:
-                self.return_to_start()
+                self.save_progress("returning")
+                if resume == "return":
+                    self.navigate(a.start)                      # leaves the place station first by itself
+                else:
+                    self.return_to_start()
+            self.save_progress("done")
             exit_code = 0
         except (Exception, KeyboardInterrupt) as error:
             logging.error("流程停止: %s", error)
@@ -665,7 +779,7 @@ class Trial:
                 pass
             for s, handler in old.items():
                 signal.signal(s, handler)
-            result.navigation = "arrived" if self.legs and all(l["status"] == "arrived" for l in self.legs) else \
+            result.navigation = "arrived" if self.legs and all(l["status"] in ("arrived", "skipped") for l in self.legs) else \
                 ("failed" if self.legs else "not_called")
             result.metadata["navigation_legs"] = self.legs
             result.metadata["navigation_note"] = "导航由 chassis/client/run_task_with_navigation.py 在 Sequence 外部执行"
@@ -706,6 +820,8 @@ def main(argv=None):
     p.add_argument("--handover", action="store_true",
                    help="先导航到起始点 T、张爪，再交接（默认：在当前位置交接）")
     p.add_argument("--no-return", action="store_true", help="放置后不返回起始点")
+    p.add_argument("--resume", action="store_true",
+                   help="继续上一次被停止/中断的任务：托盘还夹着就去放置点，已放置就返回起始点（按 runs/task_progress.json）")
     p.add_argument("--finish-place", type=float, metavar="UP_MM",
                    help="放置中途停在放置点（双臂已下降）后收尾：松爪 → 升降回原高度 → 双臂上移 UP_MM → 后移回运输位 → 回起始点")
     p.add_argument("--selfscan", action="store_true", help="准备完成后先测手臂／托盘占位（车前约 1 m 需无物体）")
