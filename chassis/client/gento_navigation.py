@@ -41,7 +41,7 @@ class NavigationError(RuntimeError):
 class GentoNavigation:
     def __init__(self, *, transport="ros", ssh_target="chassis", gaps=None, node=None,
                  ack_timeout=10.0, status_timeout=3.0, run_sh="bash ~/gento_dock/run.sh", route=None,
-                 fallback_ssh=FALLBACK_SSH, status_lost=15.0):
+                 fallback_ssh=FALLBACK_SSH, status_lost=60.0):
         if transport not in ("ros", "ssh"):
             raise ValueError("transport 必须是 ros 或 ssh")
         self.transport = transport
@@ -57,7 +57,10 @@ class GentoNavigation:
         self._status = None
         self._status_at = 0.0
         self.fallback_ssh = fallback_ssh            # ROS transport: SSH target used while the bridge is silent
-        self.status_lost = status_lost              # s without any status (ROS nor SSH): the job counts as lost
+        # s without any status (ROS nor SSH): the job counts as lost.  The chassis job runs on its own through a drop
+        # of the Orin link (2026-11-17: eth1 dropped for 3-4 s at a time, the job drove on to D): wait it out and
+        # pick the result up afterwards instead of giving up after 15 s
+        self.status_lost = status_lost
         self._ssh_job, self._ssh_at, self._ssh_tried = None, 0.0, 0.0
         if transport == "ros":
             self._init_ros(node)
@@ -172,7 +175,8 @@ class GentoNavigation:
             else:
                 job = (self._status or {}).get("job")
             if job is None or now - newest > self.status_lost:
-                raise NavigationError(f"底盘导航桥状态超时（ROS 与 ssh 都已 {self.status_lost:.0f} s 无应答）")
+                raise NavigationError(f"底盘导航桥状态超时（ROS 与 ssh 都已 {self.status_lost:.0f} s 无应答）："
+                                      "底盘网口掉线或底盘程序停止 - 运行 gento doctor")
             return job
         lines = self._ssh("job-status").strip().splitlines()
         return json.loads(lines[-1]) if lines else {"state": "idle"}

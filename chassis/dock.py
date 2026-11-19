@@ -57,6 +57,22 @@ n.create_subscription(PointCloud2, '/driver/lidar/point_cloud/Data',
                       lambda m: C.append(m) if len(C) < 8 else None, qos_profile_sensor_data)
 
 
+# the vendor programs (linkhou_robot.service: driver_node, localisation, ...) publish the lidar, the chassis state and
+# the pose; 2026-11-16 and 11-18 the service was not running after a boot (Restart=no) and every check failed
+VENDOR_DOWN = ('no %s - the vendor chassis programs are not running or not publishing (linkhou_robot.service): '
+               'run "gento doctor"; power-cycle the chassis (or: sudo systemctl restart linkhou_robot)')
+
+
+def need_state(timeout=5.0):
+    """The chassis state (move/State); a clear ABORT instead of a traceback when the vendor programs are down."""
+    t = time.time()
+    while S[0] is None and time.time() - t < timeout:
+        rclpy.spin_once(n, timeout_sec=0.1)
+    if S[0] is None:
+        raise SystemExit('ABORT: %s' % VENDOR_DOWN % ('chassis state (move/State), %.0f s' % timeout))
+    return S[0]
+
+
 def spin(t):
     e = time.time() + t
     while time.time() < e:
@@ -190,6 +206,8 @@ def cloud(fresh=False):
     log('LIDAR scan start'); FIRST['last_scan'] = time.time(); C.clear(); spin(0.15); C.clear(); t = time.time()
     while len(C) < FRAMES and time.time() - t < 4:
         rclpy.spin_once(n, timeout_sec=0.05)
+    if not C:
+        raise SystemExit('ABORT: %s' % VENDOR_DOWN % 'lidar point cloud (/driver/lidar/point_cloud/Data), 4 s')
     a = np.concatenate([np.stack([s['x'], s['y'], s['z']], 1).astype(float)
                         for s in (pc2.read_points(m, field_names=('x', 'y', 'z'), skip_nans=True) for m in list(C))])
     a = a[np.isfinite(a).all(1)]
@@ -1814,7 +1832,7 @@ elif cmd in ('dock', 'redock'):
         # the vendor navigation turns in place at the start and only sees obstacles below 0.8 m: first make
         # sure the robot + arms + tray can turn here.  With --leave (e.g. starting at the table edge with the
         # tray over the table) reverse straight out until turning is clear; otherwise stop.
-        if not S[0].is_hard_auto:
+        if not need_state().is_hard_auto:
             raise SystemExit('ABORT: hard switch is on MANUAL - switch it to AUTO first')
         check_localisation()
         if st.get('mode') == 'map' and 'pose' in st:

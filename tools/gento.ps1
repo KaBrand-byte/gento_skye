@@ -1,6 +1,7 @@
 # Gento demo control from this PC (PowerShell).  Usage:  .\gento.ps1 <command>
 #
 #   status     robot state, nav tasks, running job, last log lines        (no motion)
+#   doctor     HEALTH CHECK before a demo / between runs (runs 'gento doctor' on the Orin)  (no motion)
 #   selfscan   measure arms + tray with the lidar, store in the model      (no motion; nothing within ~1 m in front)
 #   check T|D  what docking at T / D would do from the current pose       (no motion)
 #   bench T|D  planning time of each docking step on one lidar snapshot    (no motion; limit 1.2 s)
@@ -63,6 +64,7 @@ function Confirm-Motion([string]$what) {
 
 switch ($Cmd) {
     'status'   { ssh chassis "$remote status" }
+    'doctor'   { ssh -t orin "bash ~/gento_skye/tools/gento.sh doctor"; exit $LASTEXITCODE }
     'selfscan' { ssh chassis "$remote selfscan" }
     'check'    { if (-not $Arg) { $Arg = 'D' }; ssh chassis "$remote check $Arg" }
     'bench'    { if (-not $Arg) { $Arg = 'D' }; ssh chassis "$remote bench $Arg" }
@@ -115,5 +117,5 @@ switch ($Cmd) {
         }
         Start-Process 'chrome.exe' 'http://localhost:8080'
     }
-    default    { Get-Content $PSCommandPath -TotalCount 48 | Select-Object -Skip 1 }
+    default    { Get-Content $PSCommandPath -TotalCount 49 | Select-Object -Skip 1 }
 }

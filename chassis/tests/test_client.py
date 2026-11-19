@@ -171,16 +171,27 @@ class SilentBridgeTests(unittest.TestCase):
         self.assertEqual(calls[0][-2], "sunrise@6.6.7.6")
         self.assertIn("job_status.json", calls[0][-1])
 
+    def test_link_drop_of_half_a_minute_is_ridden_out(self):
+        # 2026-11-17: eth1 dropped for seconds at a time; the chassis job drove on - the task must wait, not abort
+        calls, patch = self.ssh([subprocess.TimeoutExpired("ssh", 5)])
+        with patch:
+            nav = self.nav(30.0)
+            self.assertEqual(nav.job_status()["state"], "running")
+        calls, patch = self.ssh([json.dumps({"state": "done", "job": "D", "t": 200}) + "\n"])
+        with patch:                                              # the link is back: the result is picked up
+            nav._ssh_tried = 0.0
+            self.assertTrue(nav.is_arrived_and_stopped())
+
     def test_short_silence_without_ssh_keeps_the_last_status(self):
         calls, patch = self.ssh([subprocess.TimeoutExpired("ssh", 5)])
         with patch:
             nav = self.nav(5.0)
             self.assertEqual(nav.job_status()["state"], "running")   # not an abort yet
-            nav._status_at -= 20.0; nav._ssh_tried = 0.0
+            nav._status_at -= 70.0; nav._ssh_tried = 0.0
         calls, patch = self.ssh([subprocess.TimeoutExpired("ssh", 5)])
         with patch, self.assertRaises(NavigationError) as cm:
             nav.job_status()
-        self.assertIn("ROS 与 ssh 都已 15 s 无应答", str(cm.exception))
+        self.assertIn("ROS 与 ssh 都已 60 s 无应答", str(cm.exception)); self.assertIn("gento doctor", str(cm.exception))
 
     def test_stop_goes_over_ssh_when_the_bridge_is_silent(self):
         calls, patch = self.ssh([""])

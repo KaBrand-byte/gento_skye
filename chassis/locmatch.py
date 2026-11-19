@@ -62,6 +62,12 @@ n.create_subscription(LocationData, 'slam/LocationData', lambda m: L.__setitem__
 t = time.time()
 while (len(C) < 5 or L[0] is None) and time.time() - t < 6:
     rclpy.spin_once(n, timeout_sec=0.05)
+# both come from the vendor programs (linkhou_robot.service): a clear message instead of a traceback (2026-11-18)
+_missing = [w for w, ok in (('lidar point cloud', C), ('localisation pose (slam/LocationData)', L[0] is not None)) if not ok]
+if _missing:
+    raise SystemExit('ABORT: no %s in 6 s - the vendor chassis programs are not running or not publishing '
+                     '(linkhou_robot.service): run "gento doctor"; power-cycle the chassis (or: sudo systemctl '
+                     'restart linkhou_robot)' % ' and no '.join(_missing))
 a = np.concatenate([np.stack([s['x'], s['y'], s['z']], 1).astype(float)
                     for s in (pc2.read_points(m, field_names=('x', 'y', 'z'), skip_nans=True) for m in C)])
 a = a[np.isfinite(a).all(1)]

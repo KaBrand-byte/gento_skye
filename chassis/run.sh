@@ -39,6 +39,7 @@
 #   run.sh log              follow the job log
 #   run.sh follow           show the running job's log until it ends, then its result
 #   run.sh relocate         find the pose by matching the lidar scan to the whole map and apply it (no motion)
+#   run.sh doctor           health check before a demo: vendor programs, lidar/state/pose, localisation, eth1, bridge
 DIR=$(cd "$(dirname "$0")" && pwd)
 cd "$DIR" && source env.sh
 LOG=$DIR/run.log; PID=$DIR/run.pid; JS=$DIR/job_status.json
@@ -117,6 +118,7 @@ P
   log)      tail -n 30 -f "$LOG" ;;
   follow)   sleep 0.5; tail -n +$(( $(wc -l < "$LOG") - 2 )) -f "$LOG" & T=$!
             while running; do sleep 0.5; done; sleep 0.5; kill $T 2>/dev/null; echo; bash "$0" job-status ;;
+  doctor)   timeout 120 python3 doctor.py ;;
   relocate) timeout 240 python3 locmatch.py global --apply; timeout 60 python3 locmatch.py check | tail -n 1 ;;
-  *)        sed -n 2,36p "$0" ;;
+  *)        sed -n 2,42p "$0" ;;
 esac

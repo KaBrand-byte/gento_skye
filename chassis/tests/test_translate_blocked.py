@@ -90,5 +90,30 @@ class TranslateBlockedTest(unittest.TestCase):
         self.assertNotIn('blocked-20260101-000000-first.npy', files)
 
 
+class VendorDownTest(unittest.TestCase):
+    """2026-11-18: the vendor programs were not running; dock.py and locmatch.py died with tracebacks."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.ns = load_dock(self.tmp)
+        self.ns.update(ready_to_move=lambda: None, spin=lambda t: None)
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_no_chassis_state_is_a_clear_abort(self):
+        self.ns['S'][0] = None
+        with self.assertRaises(SystemExit) as cm:
+            self.ns['need_state'](timeout=0.2)
+        self.assertIn('move/State', str(cm.exception)); self.assertIn('linkhou_robot', str(cm.exception))
+        self.assertIn('gento doctor', str(cm.exception))
+
+    def test_no_lidar_is_a_clear_abort(self):
+        del self.ns['C'][:]
+        with redirect_stdout(io.StringIO()), self.assertRaises(SystemExit) as cm:
+            self.ns['cloud'](fresh=True)
+        self.assertIn('lidar point cloud', str(cm.exception)); self.assertIn('linkhou_robot', str(cm.exception))
+
+
 if __name__ == '__main__':
     unittest.main()

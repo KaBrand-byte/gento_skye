@@ -3,6 +3,8 @@
 # on the robot network.  Same commands as tools/gento.ps1.  Usage:  gento <command> [args]
 #
 #   status     robot state, nav tasks, running job, last log lines        (no motion)
+#   doctor     HEALTH CHECK before a demo / between runs: Orin<->chassis link, vendor programs, lidar,
+#              chassis state, localisation, eth1 drops, bridge, arms - verdict + what to do  (no motion)
 #   selfscan   measure arms (+ tray) with the lidar, store in the model    (no motion; nothing within ~1 m in front)
 #   check T|D  what docking at T / D would do from the current pose       (no motion)
 #   bench T|D  planning time of each docking step on one lidar snapshot    (no motion; limit 1.2 s)
@@ -70,6 +72,13 @@ quote() { local out=""; for a in "$@"; do out+=" $(printf '%q' "$a")"; done; ech
 cmd=${1:-help}; shift || true
 case "$cmd" in
   status|selfscan|job-status|relocate|stop|waypoints)  ch "$cmd" ;;
+  doctor)     if [ $ON_ORIN != 1 ]; then ssh -t -o ConnectTimeout=10 "$ORIN" "bash ~/gento_skye/tools/gento.sh doctor"; exit $?; fi
+              rc=0; orin doctor || rc=$?; echo
+              if ssh -o BatchMode=yes -o ConnectTimeout=5 "$CHASSIS" true 2>/dev/null; then ch doctor || rc=$?
+              else echo "底盘体检：跳过（ssh 连不上底盘）"; rc=2; fi
+              echo; if [ $rc -eq 0 ]; then echo "==== 总结论：可以开始 ===="
+              else echo "==== 总结论：不能开始 - 按上面 [失败] 项后面的提示处理，再 gento doctor ===="; fi
+              exit $rc ;;
   job)        ch job-status ;;
   check)      ch check "${1:-D}" ;;
   bench)      ch bench "${1:-D}" ;;
@@ -100,5 +109,5 @@ case "$cmd" in
   setup)      [ $ON_ORIN = 1 ] || { echo "run 'gento setup' on the Orin"; exit 1; }
               [ -f ~/.ssh/id_ed25519 ] || ssh-keygen -t ed25519 -N "" -f ~/.ssh/id_ed25519
               ssh-copy-id -o ConnectTimeout=10 sunrise@6.6.7.6 && ssh -o BatchMode=yes sunrise@6.6.7.6 echo "chassis login OK" ;;
-  *)          sed -n '2,44p' "$0" ;;
+  *)          sed -n '2,46p' "$0" ;;
 esac

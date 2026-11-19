@@ -6,6 +6,7 @@
 #   bash orin_task.sh attach                re-attach (e.g. after a Wi-Fi drop); Ctrl-b d detaches again
 #   bash orin_task.sh stop                  Ctrl-C to the task (stops arms + chassis) and software-stop the chassis
 #   bash orin_task.sh check                 no motion: config check and SDK version
+#   bash orin_task.sh doctor                no motion: health check of the Orin end (link, bridge, arms); exit 2 = do not start
 #   bash orin_task.sh grip open|close [left|right]   only the grippers (arms do not move); not while a task
 #                                           runs - in the task window use o / c instead.  Stays as it is after exit.
 #
@@ -106,11 +107,52 @@ n = GentoNavigation(); time.sleep(1); n.stop(); print('chassis stopped'); n.clos
     env_setup
     python3 -m skye_task gripper "$2" --transport sdk --robot-config "${GENTO_TASK_CONFIG:-config/default.json}" \
       --config config/gripper-can.json --side "${3:-both}" --hold-seconds 1 --brief --result runs/gripper-manual.json ;;
+  doctor)     # NO MOTION: the Orin end - link to the chassis, docking bridge over ROS, arm controller; exit 2 = do not start
+    set +e; env_setup; CH=${GENTO_CHASSIS:-sunrise@6.6.7.6}; HOST=${CH#*@}; fail=0; warn=0
+    say() { printf '  %s %s\n' "$1" "$2"; [ "$1" = '[失败]' ] && fail=$((fail + 1)); [ "$1" = '[警告]' ] && warn=$((warn + 1)); true; }
+    echo "Orin 体检  $(date '+%F %T')"
+    loss=$(ping -c 10 -i 0.2 -W 1 "$HOST" 2>/dev/null | grep -oE '[0-9.]+% packet loss' | cut -d% -f1)
+    case "${loss:-100}" in
+      0)   say '[ OK ]' "到底盘 $HOST 的网络：10/10 通" ;;
+      100) say '[失败]' "到底盘 $HOST 完全不通  ->  底盘是否开机；Orin 与底盘之间的网线/接口" ;;
+      *)   say '[警告]' "到底盘 $HOST 丢包 ${loss}%  ->  网口在掉线：演示前整机断电重启；仍丢包就换网线并报厂家" ;;
+    esac
+    if ssh -o BatchMode=yes -o ConnectTimeout=5 "$CH" true 2>/dev/null; then say '[ OK ]' "ssh 免密登录底盘正常"
+    else say '[失败]' "ssh 登录底盘失败  ->  网络不通，或还没做过 gento setup"; fi
+    IF=$(ip -o -4 addr 2>/dev/null | awk '$4 ~ /^6\.6\.7\./ {print $2; exit}')
+    if [ -n "$IF" ]; then
+      cc=$(cat "/sys/class/net/$IF/carrier_changes" 2>/dev/null)
+      if [ "${cc:-0}" -gt 2 ]; then say '[警告]' "Orin 网口 $IF 开机以来断开过 $(( (cc - 1) / 2 )) 次  ->  查网线和接口"
+      else say '[ OK ]' "Orin 网口 $IF 开机以来没断过"; fi
+    fi
+    n=$(timeout 20 python3 - <<'P' 2>/dev/null
+import sys, time; sys.path.insert(0, 'chassis/client')
+from gento_navigation import GentoNavigation
+nav = GentoNavigation(fallback_ssh=None); seen = set(); t0 = time.time()
+while time.time() - t0 < 5:
+    s = nav._status
+    if s:
+        seen.add(s.get('t'))
+    time.sleep(0.1)
+nav.close(); print(len(seen))
+P
+)
+    if [ "${n:-0}" -ge 6 ]; then say '[ OK ]' "导航桥状态经 ROS 收到：5 s 内 $n 条"
+    elif [ "${n:-0}" -gt 0 ]; then say '[警告]' "导航桥状态经 ROS 只收到 $n 条（应约 10 条）  ->  底盘过载或网口不稳"
+    else say '[失败]' "导航桥状态经 ROS 一条都没收到  ->  看底盘体检里的导航桥一项；网络通的话检查 ROS_DOMAIN_ID/CycloneDDS 配置"; fi
+    if pgrep -f "^python3 chassis/client/run_task_with_navigation.py" >/dev/null; then
+      say '[警告]' "已有任务在运行（手臂检查跳过）  ->  gento task-attach 查看"
+    elif timeout 40 python3 -m skye_task check --config "${GENTO_TASK_CONFIG:-config/default.json}" >/dev/null 2>&1 && timeout 20 python3 -c "
+import sys; sys.path.insert(0, '$GENTO_SDK_ROOT/PYTHON_SDK')
+import GentoRobot; GentoRobot.GentoRobot(precision=6).get_sdk_version()" >/dev/null 2>&1; then say '[ OK ]' "任务配置和手臂 SDK 正常"
+    else say '[失败]' "任务配置或手臂 SDK 检查失败  ->  gento task-check 看详细信息；手臂控制器是否上电"; fi
+    if [ $fail -gt 0 ]; then echo "结论：不能开始（$fail 项失败）"; exit 2; fi
+    [ $warn -gt 0 ] && echo "结论：可以开始（$warn 项警告，看一下）" || echo "结论：一切正常，可以开始" ;;
   check)
     env_setup
     python3 -m skye_task check --config "${GENTO_TASK_CONFIG:-config/default.json}" > /dev/null && echo "config ok"
     python3 -c "
 import sys; sys.path.insert(0, '$GENTO_SDK_ROOT/PYTHON_SDK')
 import GentoRobot; print('SDK', GentoRobot.GentoRobot(precision=6).get_sdk_version())" ;;
-  *) sed -n 2,12p "$0" ;;
+  *) sed -n 2,13p "$0" ;;
 esac

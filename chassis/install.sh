@@ -6,7 +6,7 @@
 set -e
 SRC=$(cd "$(dirname "$0")" && pwd); DIR=${1:-$HOME/gento_dock}; USER_=$(id -un)
 mkdir -p "$DIR"
-for f in dock.py robot_model.py route.py latency_report.py dock_bridge.py job_wrap.py run.sh nav.py locmatch.py boot_check.sh edge.py over_map.py env.sh sim_test.py; do
+for f in dock.py doctor.py robot_model.py route.py latency_report.py dock_bridge.py job_wrap.py run.sh nav.py locmatch.py boot_check.sh edge.py over_map.py env.sh sim_test.py; do
   install -m 0755 "$SRC/$f" "$DIR/$f"
 done
 [ -f "$DIR/stations.json" ]    || cp "$SRC/stations.example.json" "$DIR/stations.json"
