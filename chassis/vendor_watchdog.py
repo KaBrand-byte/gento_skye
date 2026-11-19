@@ -38,6 +38,10 @@ MAX_RESTARTS, RESTART_WINDOW = 3, 600
 UP_TIMEOUT = 150       # s for the restarted programs to publish again
 SETTLE = 20            # s after they publish, before relocalising (vendor initialisation, as boot_check.sh)
 RECHECK = 15           # s between localisation checks while relocate_failed
+RELOC_ROUNDS = 3       # relocalisation rounds (T, D, whole map each) after a restart: one is often not enough
+RELOC_SETTLE = 5.0     # s for the vendor pose to settle after a relocalisation before it is judged
+RELOC_RETRY = 120      # s: while relocate_failed, another round this often ...
+RELOC_RETRIES = 5      # ... at most this many times (2026-11-19: a few 'gento relocate' runs fixed it by hand)
 VENDOR_ERR = ('vendor chassis programs', 'VENDOR DOWN', 'job died')
 KILLED = 'ABORT: VENDOR DOWN: the vendor chassis programs stopped (%s) - restarting them (vendor_watchdog)'
 
@@ -162,21 +166,37 @@ class Watchdog:
             pass
         self.log('stopped job %s: %s' % (job.get('job'), why))
 
-    def relocate(self):
-        """At T, at D (the robot usually stands at one of them), else over the whole map; the match after it."""
+    def settled_match(self):
+        """The match once the vendor pose had time to follow a relocalisation (checked twice)."""
+        best = None
+        for _ in range(2):
+            self.sleep(RELOC_SETTLE)
+            m = self.match()
+            if m is not None and (best is None or m > best):
+                best = m
+            if best is not None and best >= doctor.MATCH_OK:
+                break
+        return best
+
+    def relocate(self, rounds=RELOC_ROUNDS):
+        """At T, at D (the robot usually stands at one of them), else over the whole map - repeated: after a
+        restart the vendor pose did not follow the first relocalisations (2026-11-19).  (match, how)."""
         try:
             st = load(ST_FILE)
         except (OSError, ValueError):
             st = {}
-        for name in ('T', 'D'):
-            pose = st.get(name, {}).get('pose')
-            if pose:
-                self.run('timeout 90 python3 locmatch.py at %.3f %.3f %.2f --apply' % tuple(pose[:3]), 100)
-                m = self.match()
+        tries = [('at %s' % n, 'timeout 90 python3 locmatch.py at %.3f %.3f %.2f --apply' % tuple(st[n]['pose'][:3]), 100)
+                 for n in ('T', 'D') if st.get(n, {}).get('pose')]
+        tries.append(('whole map', 'timeout 400 python3 locmatch.py global --apply', 410))
+        m = None
+        for r in range(1, rounds + 1):
+            for how, cmd, timeout in tries:
+                self.run(cmd, timeout)
+                m = self.settled_match()
+                self.log('  relocalise %s (round %d/%d): match %s' % (how, r, rounds, m))
                 if m is not None and m >= doctor.MATCH_OK:
-                    return m, 'at %s' % name
-        self.run('timeout 400 python3 locmatch.py global --apply', 410)
-        return self.match(), 'whole map'
+                    return m, '%s (round %d)' % (how, r)
+        return m, '%d rounds' % rounds
 
     def verify(self, why):
         """Programs up: data flowing and the pose matching the map (relocalise if not).  False: no data."""
@@ -192,7 +212,7 @@ class Watchdog:
             self.ok(m, 'relocalised %s, match %.2f' % (how, m))
         else:
             self.set('relocate_failed', 'relocalisation failed (match %s): gento relocate, or on the web page' % m,
-                     match=m)
+                     match=m, reloc_at=int(self.now()), reloc_retries=0)
         return True
 
     def recover(self, why):
@@ -250,11 +270,23 @@ class Watchdog:
             if not self.verify('first check after boot'):
                 self.recover('no vendor data')
             return
-        if self.s.get('state') == 'relocate_failed' and self.now() - self.last_recheck >= RECHECK:
-            self.last_recheck = self.now()
-            m = self.match()
-            if m is not None and m >= doctor.MATCH_OK:
-                self.ok(m, 'localisation fixed by hand, match %.2f' % m)
+        if self.s.get('state') == 'relocate_failed':
+            if self.now() - self.last_recheck >= RECHECK:          # fixed by hand meanwhile?
+                self.last_recheck = self.now()
+                m = self.match()
+                if m is not None and m >= doctor.MATCH_OK:
+                    self.ok(m, 'localisation fixed by hand, match %.2f' % m)
+                    return
+            if (self.now() - self.s.get('reloc_at', 0) >= RELOC_RETRY
+                    and self.s.get('reloc_retries', 0) < RELOC_RETRIES):
+                self.s['reloc_retries'] = self.s.get('reloc_retries', 0) + 1
+                self.s['reloc_at'] = int(self.now())
+                m, how = self.relocate(rounds=1)
+                if m is not None and m >= doctor.MATCH_OK:
+                    self.ok(m, 'relocalised %s on retry %d, match %.2f' % (how, self.s['reloc_retries'], m))
+                else:
+                    self.set('relocate_failed', 'relocalisation retry %d/%d failed (match %s): gento relocate, or on the '
+                             'web page' % (self.s['reloc_retries'], RELOC_RETRIES, m), match=m)
             return
         self.set(self.s.get('state', 'ok'))             # heartbeat
 

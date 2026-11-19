@@ -6,7 +6,7 @@
 #   bash orin_task.sh attach                re-attach (e.g. after a Wi-Fi drop); Ctrl-b d detaches again
 #   bash orin_task.sh stop                  Ctrl-C to the task (stops arms + chassis) and software-stop the chassis
 #   bash orin_task.sh check                 no motion: config check and SDK version
-#   bash orin_task.sh doctor                no motion: health check of the Orin end (link, bridge, arms); exit 2 = do not start
+#   bash orin_task.sh doctor                no motion: health check of the Orin end (link, bridge, arms, lift); exit 2 = do not start
 #   bash orin_task.sh grip open|close [left|right]   only the grippers (arms do not move); not while a task
 #                                           runs - in the task window use o / c instead.  Stays as it is after exit.
 #
@@ -142,10 +142,13 @@ P
     else say '[失败]' "导航桥状态经 ROS 一条都没收到  ->  看底盘体检里的导航桥一项；网络通的话检查 ROS_DOMAIN_ID/CycloneDDS 配置"; fi
     if pgrep -f "^python3 chassis/client/run_task_with_navigation.py" >/dev/null; then
       say '[警告]' "已有任务在运行（手臂检查跳过）  ->  gento task-attach 查看"
-    elif timeout 40 python3 -m skye_task check --config "${GENTO_TASK_CONFIG:-config/default.json}" >/dev/null 2>&1 && timeout 20 python3 -c "
-import sys; sys.path.insert(0, '$GENTO_SDK_ROOT/PYTHON_SDK')
-import GentoRobot; GentoRobot.GentoRobot(precision=6).get_sdk_version()" >/dev/null 2>&1; then say '[ OK ]' "任务配置和手臂 SDK 正常"
-    else say '[失败]' "任务配置或手臂 SDK 检查失败  ->  gento task-check 看详细信息；手臂控制器是否上电"; fi
+    else                                      # arm controller, read only: errors, lift height, arm pose
+      arms=$(timeout 60 python3 chassis/client/arm_check.py --config "${GENTO_TASK_CONFIG:-config/default.json}" 2>&1)
+      [ -n "$arms" ] || arms="  [失败] 手臂检查没有输出（超时？）  ->  手臂控制器是否上电"
+      echo "$arms" | grep -E '^  \[' || echo "  [失败] 手臂检查出错：$(echo "$arms" | tail -n 1)"
+      fail=$((fail + $(echo "$arms" | grep -c '^  \[失败\]'))); warn=$((warn + $(echo "$arms" | grep -c '^  \[警告\]')))
+      echo "$arms" | grep -qE '^  \[' || fail=$((fail + 1))
+    fi
     if [ $fail -gt 0 ]; then echo "结论：不能开始（$fail 项失败）"; exit 2; fi
     [ $warn -gt 0 ] && echo "结论：可以开始（$warn 项警告，看一下）" || echo "结论：一切正常，可以开始" ;;
   check)

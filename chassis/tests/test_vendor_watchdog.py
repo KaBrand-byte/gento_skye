@@ -20,6 +20,7 @@ class Chassis:
     def __init__(self):
         self.procs, self.service, self.data, self.matches = ALL, 'active', True, [0.95]
         self.calls, self.boot_check = [], 'inactive'
+        self.fix_after_global = None        # the pose follows only after this many whole-map relocalisations
 
     def run(self, cmd, timeout=30):
         self.calls.append(cmd)
@@ -32,6 +33,10 @@ class Chassis:
         if 'gather_ros' in cmd:
             n = 30 if self.data else 0
             return 0, json.dumps(dict(lidar=n, state=n, pose=n))
+        if 'locmatch.py global --apply' in cmd and self.fix_after_global is not None:
+            self.fix_after_global -= 1
+            if self.fix_after_global <= 0:
+                self.matches = [0.95]
         if 'locmatch.py check' in cmd:
             m = self.matches.pop(0) if len(self.matches) > 1 else self.matches[0]
             return 0, json.dumps(dict(match=m))
@@ -128,6 +133,26 @@ class WatchdogTest(unittest.TestCase):
         self.ch.matches = [0.93]                                            # fixed by hand (gento relocate)
         self.clock[0] += VW.RECHECK
         self.assertEqual(self.step()['state'], 'ok')
+
+    def test_relocalisation_repeated_until_the_pose_follows(self):
+        # 2026-11-19: after a restart the vendor pose ignored the first relocalisations; repeating fixed it
+        self.step()
+        self.ch.data = False
+        self.job({'state': 'failed', 'job': 'D', 'error': 'VENDOR DOWN', 't': int(self.clock[0])})
+        self.ch.matches, self.ch.fix_after_global = [0.33], 2
+        s = self.step()
+        self.assertEqual(s['state'], 'ok'); self.assertIn('round 2', s['event'])
+        self.assertEqual(sum('global --apply' in c for c in self.ch.calls), 2)
+
+    def test_relocate_failed_retries_by_itself(self):
+        self.step()
+        self.ch.data = False
+        self.job({'state': 'failed', 'job': 'D', 'error': 'VENDOR DOWN', 't': int(self.clock[0])})
+        self.ch.matches, self.ch.fix_after_global = [0.33], VW.RELOC_ROUNDS + 1
+        self.assertEqual(self.step()['state'], 'relocate_failed')
+        self.clock[0] += VW.RELOC_RETRY
+        s = self.step()
+        self.assertEqual(s['state'], 'ok'); self.assertIn('retry 1', s['event'])
 
     def test_gives_up_after_too_many_restarts(self):
         self.step()

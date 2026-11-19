@@ -77,10 +77,11 @@ gento task-stop                     # 停止任务：双臂 + 底盘
   - 可以尝试（需要 root，请人工决定）：`sudo ethtool -K eth1 tso off` 关掉 TSO 观察；或者把这个问题报给底盘厂家（hobot_gmac 发送队列卡住）。
 - **厂家程序没起来（11-16、11-18）**：底盘开机后，厂家主服务 `linkhou_robot` 下的 `driver_node`、`linkhou_location`、`controller_core`、`robot_server` 一个都没在运行。该服务是 `Restart=no`，退出后不会自动重启。现象是 ping、ssh 都通，但激光、`move/State`、定位全都没有数据，`locmatch.py` 和 `dock.py` 直接抛 Python 报错。现在会给出明确提示，让你执行 `gento doctor` 并断电重启；整机断电重启后就能恢复。
 - **演示前体检 `gento doctor`**（不动车）：
+  - 手臂控制器（`client/arm_check.py`，只连接、只读、不使能）：各控制对象有无报错、升降高度是否在任务要求的范围内（不在就会被任务拒绝）、躯干/头是否在示教姿态、双臂在运输位/准备位/其他位置；
   - Orin 端（`orin_task.sh doctor`）：ping 丢包、ssh、Orin 网口断开次数、导航桥状态能否经 ROS 收到、任务配置和手臂 SDK；
   - 底盘端（`run.sh doctor` → `doctor.py`）：厂家服务和进程、激光/底盘状态/定位在 5 秒内各收到几条、硬开关、定位置信度和扫描匹配度、开机以来 `eth1` 掉线次数、负载、导航桥。
   - 最后给出“可以开始 / 不能开始”，每个失败项后面写着处理办法。演示流程见 [docs/demo-checklist.md](docs/demo-checklist.md)。
-- **底盘程序自动看护（`vendor_watchdog.py`，systemd 服务 `gento-vendor-watchdog`）**：每 5 s 检查厂家服务和进程。连续 3 次发现停了，或者某个作业报“收不到厂家数据”且 5 s 话题检查确认，就停掉正在跑的作业（写入 `VENDOR DOWN`），用 `sudo -n systemctl restart linkhou_robot` 重启，等数据恢复，取消残留导航任务，再自动重定位（先按 T、D 位置，再搜整张地图，匹配度 ≥0.85 才算成功）。10 分钟内最多重启 3 次。开机 3 分钟内和 boot_check 运行期间不插手；作业运行中不做重定位。状态写在 `vendor_watchdog.json`，由导航桥一起发布，日志在 `watchdog.log`。
+- **底盘程序自动看护（`vendor_watchdog.py`，systemd 服务 `gento-vendor-watchdog`）**：每 5 s 检查厂家服务和进程。连续 3 次发现停了，或者某个作业报“收不到厂家数据”且 5 s 话题检查确认，就停掉正在跑的作业（写入 `VENDOR DOWN`），用 `sudo -n systemctl restart linkhou_robot` 重启，等数据恢复，取消残留导航任务，再自动重定位（先按 T、D 位置，再搜整张地图，匹配度 ≥0.85 才算成功）。重定位会连续做 3 轮（每轮按 T、D、整张地图各试一次，每次等位置稳定后再判断），还不行就进入“需要人工重定位”，之后每 2 分钟自动再试一轮，最多 5 次；人工重定位成功后 15 s 内会发现。2026-11-19 真机模拟：重启后厂家定位偏了约 20 cm，第一轮重定位没生效，多跑几次 relocate 后恢复。10 分钟内最多重启 3 次。开机 3 分钟内和 boot_check 运行期间不插手；作业运行中不做重定位。状态写在 `vendor_watchdog.json`，由导航桥一起发布，日志在 `watchdog.log`。
   - Orin 上的任务遇到 `VENDOR DOWN`、“收不到厂家数据”、`job died` 或底盘失联超过 60 s 时，原地等待（最多 20 分钟，Ctrl-C 可停）：网恢复后作业还在跑就继续跟着；否则等看护在失败之后确认底盘正常，再把被打断的那一段重新执行。底盘上没有装看护时，行为和以前一样，直接失败。
 - **Orin 端容忍底盘短时失联**：导航桥和 ssh 都没有应答时，从 15 秒放宽到 60 秒才判定失败。底盘作业在底盘上独立运行，网络恢复后会读回结果，任务接着走。失联期间软件停车指令到不了底盘，急停必须有人看着。
 - **倒车进 T 被一帧假点挡住（2026-11-17 13:15）**：地图接近 T 时要倒车 0.83 m，单帧点云里车后 1.16 m、离地 0.78 m 处有 24 个点，比 3 cm 安全余量只多进去 2 mm，程序当场中止，没回到 T。当时那里没有东西：T 的参考扫描在那个位置是空的，4 分钟后从同一方向进 T 也正常。
