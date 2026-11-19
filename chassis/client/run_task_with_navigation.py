@@ -67,6 +67,7 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from gento_navigation import GentoNavigation, NavigationError  # noqa: E402
+from offline_axes import OfflineAxes  # noqa: E402
 from skye_task.__main__ import wait_for_start, write_report  # noqa: E402
 from skye_task.config import load_config  # noqa: E402
 from skye_task.geometry import local_displacement, translated  # noqa: E402
@@ -303,6 +304,9 @@ class Trial:
             if lift_min > MAX_LIFT_ASSIST_MM:
                 raise MotionError(f"放置时升降下降 {lift_min:.0f} mm 超过允许的 {MAX_LIFT_ASSIST_MM:.0f} mm")
             self.place_plan["lift_down"] = lift_min
+        if self.place_plan["lift_down"] and "lift" in getattr(self._sdk, "offline", ()):
+            raise MotionError(f"放置需要升降分担 {self.place_plan['lift_down']:.0f} mm，但升降没有上线（读数为 0）："
+                              "松开所有急停后整机断电重启让升降上线，或减小下降深度（--down-mm）")
         self.place_plan["total_down"] = self.place_plan["arm_down"] + self.place_plan["lift_down"]
         seq.result.metadata["place_motion_mm"] = {"forward": c.forward_mm, "down": down, "up": up, **self.place_plan}
         logging.info("放置动作只读规划通过：前伸 %s，双臂下降 %.0f + 升降 %.0f = %.0f mm，松爪后升降回升、双臂上移 %.0f，再后移回运输位",
@@ -598,7 +602,7 @@ class Trial:
         if any(route.values()):
             logging.info("路线变化：途经点 %s，安全点随机偏移 %s m", route["via"] or "无", route["jitter"] or 0)
         self.nav = GentoNavigation(transport=a.transport, ssh_target=a.ssh_target, gaps=gaps, route=route)
-        sdk = GentoSDK(config)
+        sdk = OfflineAxes(GentoSDK(config), config)     # lift / waist / head not initialised: run on the arms
         self.sequence = self.make_sequence(sdk, config)
         result = self.sequence.result
         old = {s: signal.signal(s, lambda *_: self.sequence.request_stop()) for s in (signal.SIGINT, signal.SIGTERM)}

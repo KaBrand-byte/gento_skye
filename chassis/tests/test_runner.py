@@ -20,6 +20,34 @@ import run_task_with_navigation as runner  # noqa: E402
 runner.LINK_RELEASE_S = 0.0
 from gento_navigation import NavigationError  # noqa: E402
 from test_sequence import Device  # noqa: E402  (skye_task's offline robot double)
+from skye_task.sdk import MotionError  # noqa: E402
+
+
+class OfflineDevice(Device):
+    """After some power-ups the controller never initialises the lift / head drivers: they read 0, stay out of
+    position mode, and switching them fails with -28 (2026-11-12, 11-13, 11-20)."""
+    OBJECTS = {"left": 0, "right": 1, "head": 2, "body": 3, "lift": 4}
+    OFFLINE = ("lift", "head")
+    made = []
+
+    def __init__(self, config):
+        super().__init__(config)
+        for name in self.OFFLINE:
+            self.rt[name] = {"state": {"cur": 0, "err": 0}, "fb_pos": [0.0] * len(self.rt[name]["fb_pos"])}
+        OfflineDevice.made.append(self)
+
+    def enter_position(self, feedback, checkpoint):
+        for arm in self.rt["arms"]:
+            arm["state"]["cur"] = 1
+        for name in ("head", "body", "lift"):
+            if name in self.OBJECTS:                      # the wrapper leaves out the offline ones
+                if name in self.OFFLINE:
+                    raise MotionError(f"{name} 进入位置模式 失败，SDK 返回 -28")
+                self.rt[name]["state"]["cur"] = 1
+        self.tools = [[0] * 6 for _ in range(2)]
+
+    def move_lift(self, target):
+        raise AssertionError("the offline lift must not be commanded")
 
 
 class FakeNav:
@@ -203,7 +231,8 @@ class RunnerTests(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
-    def run_trial(self, fail_on=None, extra=(), arms=None, nav_cls=None, answers=("", "1"), tty=True, lift=None):
+    def run_trial(self, fail_on=None, extra=(), arms=None, nav_cls=None, answers=("", "1"), tty=True, lift=None,
+                  device_cls=None):
         """`answers`: what the operator types, in order (handover: o / c / Enter; after placing: 1 / 0, r ...)."""
         typed = iter(answers)
         self.typed = typed
@@ -212,7 +241,7 @@ class RunnerTests(unittest.TestCase):
             seq.checked_feedback()
             return next(typed)
         def device(config):
-            d = Device(config)
+            d = (device_cls or Device)(config)
             d.close = lambda: None                                           # the real GentoSDK has close()
             for i, arm in enumerate(d.rt["arms"]):
                 arm["fb"]["fb_pos"] = list((arms or config.ready)[i])
@@ -520,6 +549,27 @@ class RunnerTests(unittest.TestCase):
             code, report = self.run_trial(nav_cls=LinkLostNav)
         self.assertEqual(code, 0)
         self.assertEqual([e for e in FakeNav.log if e[0] == "start"].count(("start", "D")), 1)
+
+    def fixed_lift(self):
+        """As on the robot (config/default.json): one lift height, the task never moves the lift."""
+        data = json.loads(self.cfg.read_text()); data["ready_lift"] = data["receive_lift"] = [700]
+        self.cfg.write_text(json.dumps(data))
+
+    def test_lift_and_head_not_initialised_the_task_runs_on_the_arms(self):
+        OfflineDevice.made = []
+        self.fixed_lift()
+        code, report = self.run_trial(device_cls=OfflineDevice)
+        self.assertEqual(code, 0)
+        self.assertEqual(report["status"], "completed")
+        self.assertIn("release", [s["name"] for s in report["steps"]])
+        self.assertTrue(OfflineDevice.made)
+
+    def test_place_needing_the_offline_lift_stops_before_any_motion(self):
+        self.fixed_lift()
+        code, report = self.run_trial(device_cls=OfflineDevice, extra=["--place-lift-mm", "30"])
+        self.assertEqual(code, 1)
+        self.assertIn("升降没有上线", report.get("error", ""))
+        self.assertNotIn("forward", [s["name"] for s in report["steps"]])
 
     def test_other_docking_failures_still_stop(self):
         code, report = self.run_trial(fail_on="D")

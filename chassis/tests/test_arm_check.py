@@ -43,6 +43,13 @@ class ArmCheckTest(unittest.TestCase):
                               'lift': {'err': 5, 'cur': 1}})
         self.assertTrue(any(lv == 'fail' and 'lift(err=5' in t for lv, t in res), res)
 
+    def test_lift_and_head_not_initialised_is_a_warning_not_a_failure(self):
+        res = verdict(lift=0.0, head=[0.0, 0.0], offline=['lift', 'head'],
+                      states={'左臂': OK_STATE, '右臂': OK_STATE, 'body': OK_STATE,
+                              'head': {'err': 0, 'cur': 0}, 'lift': {'err': 0, 'cur': 0}})
+        self.assertFalse(any(lv == 'fail' for lv, _ in res), res)
+        self.assertTrue(any(lv == 'warn' and '升降、头部没有上线' in t and '700 mm' in t for lv, t in res), res)
+
     def test_arm_poses(self):
         ready = [list(a) for a in CONFIG.ready]
         self.assertTrue(any(lv == 'warn' and '准备位' in t for lv, t in verdict(joints=ready)))
