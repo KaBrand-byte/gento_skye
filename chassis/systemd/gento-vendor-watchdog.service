@@ -1,0 +1,15 @@
+[Unit]
+Description=Gento vendor watchdog: restart the vendor chassis programs (linkhou_robot) when they stop, relocalise
+After=linkhou_robot.service network-online.target
+
+[Service]
+User=@USER@
+Group=@USER@
+ExecStart=/usr/bin/bash -c "source @DIR@/env.sh && exec python3 @DIR@/vendor_watchdog.py"
+Restart=always
+RestartSec=5
+KillMode=mixed
+TimeoutStopSec=10
+
+[Install]
+WantedBy=multi-user.target

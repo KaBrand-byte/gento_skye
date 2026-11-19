@@ -42,6 +42,19 @@ ROOT = Path(__file__).resolve().parents[2]
 LINK_RELEASE_S = 2.0
 RANDOM_ROUTE_JITTER = 0.08  # m: --random-route, random spot within this of the taught safe points
 BLOCK_PAUSE = 2.0          # s: docking blocked (the chassis already waited 30 s): pause, then check again
+RECOVER_TIMEOUT = 20 * 60  # s: wait this long for the chassis to recover (vendor programs restarted, link back)
+VENDOR_MARKS = ("vendor chassis programs", "VENDOR DOWN", "job died")
+
+
+def chassis_trouble(text):
+    """'vendor': the vendor chassis programs stopped / sent no data (the chassis watchdog restarts them);
+    'lost': no status from the chassis for status_lost s (link down); None: anything else."""
+    text = str(text or "")
+    if any(mark in text for mark in VENDOR_MARKS):
+        return "vendor"
+    if "状态超时" in text:
+        return "lost"
+    return None
 MAX_LIFT_ASSIST_MM = 60.0  # at most this much of the place descent is done by the lift instead of the arms
 PLACE_DOWN_MM = 135.0      # total place descent (arms + lift).  Basket since 2026-11-17: the tray's 185 mm
                            # (arms 135 + lift 50) pressed the basket into the belt and pushed the arms up -> 5 cm less
@@ -420,6 +433,74 @@ class Trial:
                 logging.error("SDK 资源释放失败: %s", error)
             time.sleep(LINK_RELEASE_S)
 
+    def _restart_leg(self, destination, undock):
+        """Submit the interrupted leg again (the bridge may need a moment after the chassis recovered)."""
+        for attempt in range(1, 6):
+            try:
+                self.nav.start_undock() if undock else self.nav.start(destination)
+                return
+            except NavigationError as error:
+                if attempt == 5:
+                    raise
+                logging.warning("重新提交 %s 失败（第 %d 次），5 s 后再试: %s", destination, attempt, error)
+                pause = time.monotonic()
+                while time.monotonic() - pause < 5.0:
+                    self.sequence.checked_feedback(); time.sleep(self.args.poll)
+
+    def wait_for_chassis(self, destination, target, error, kind):
+        """The chassis stopped working under this leg: its vendor programs stopped ('vendor') or it could not be
+        reached ('lost').  Wait where we are (arms keep holding; Ctrl-C stops) until the chassis watchdog reports it
+        recovered - programs restarted, localisation checked - after the failure, then the leg runs again.
+        Returns 'restart', 'resume' (link back, our job still running) or 'arrived' (it finished meanwhile)."""
+        nav, seq = self.nav, self.sequence
+        print(chr(7), flush=True)
+        logging.warning("底盘%s：原地等待底盘自动恢复后继续去 %s（最多 %d 分钟；Ctrl-C 停止）：%s",
+                        "程序停止或没有数据" if kind == "vendor" else "失联", destination, RECOVER_TIMEOUT // 60, error)
+        start, fail_t, base_t, boot, last = time.monotonic(), None, None, None, None
+        while time.monotonic() - start < RECOVER_TIMEOUT:
+            seq.checked_feedback()
+            try:
+                job = nav.job_status()
+            except NavigationError:
+                job = None                              # still unreachable
+            if job is not None:
+                ours = job.get("job") == target
+                if kind == "lost" and ours and job.get("state") == "running":
+                    logging.info("底盘已重新连上，作业仍在进行: %s", destination)
+                    return "resume"
+                if kind == "lost" and ours and job.get("state") == "done":
+                    try:
+                        if nav.is_arrived_and_stopped():
+                            return "arrived"
+                    except NavigationError:
+                        pass
+                if job.get("state") == "failed" and kind == "lost" and not chassis_trouble(job.get("error")):
+                    if "BLOCKED" in str(job.get("error")):
+                        return "restart"                # blocked while we could not see it: just try again
+                    raise NavigationError(job.get("error") or "导航失败")
+                health = nav.chassis_health()
+                state = (health or {}).get("state")
+                if state == "absent":                   # no watchdog on this chassis: as before, the leg fails
+                    raise error
+                if job.get("state") == "failed" and fail_t is None:
+                    fail_t = job.get("t")
+                if health and base_t is None:
+                    base_t, boot = health.get("t"), health.get("boot")
+                if state != last and state is not None:
+                    logging.info("底盘恢复状态: %s %s", state, (health or {}).get("event") or "")
+                    if state == "gave_up":
+                        logging.error("底盘自动恢复已放弃：需要重启底盘；底盘重启后这里会继续等（Ctrl-C 停止）")
+                    last = state
+                # verified after the failure; after a chassis reboot its clock starts over: any check of the new boot
+                rebooted = boot is not None and health.get("boot") not in (None, boot)
+                if (state == "ok" and ((health.get("ok_since") or 0) >= (fail_t or base_t or 0) or rebooted)
+                        and job.get("state") != "running"):
+                    return "restart"
+            pause = time.monotonic()
+            while time.monotonic() - pause < 1.0:
+                seq.checked_feedback(); time.sleep(self.args.poll)
+        raise MotionError(f"底盘 {RECOVER_TIMEOUT // 60} 分钟内没有恢复: {error}")
+
     def navigate(self, destination, undock=False):
         """Drive to `destination` (or reverse out with undock=True); keep checking the arms; return only after
         docked and standing still."""
@@ -432,11 +513,24 @@ class Trial:
         retries, note, blocked_since = 0, None, None
         while True:
             seq.checked_feedback()                      # stop request + arm/lift/waist feedback unchanged
-            if nav.is_arrived_and_stopped():
-                break
             try:
+                if nav.is_arrived_and_stopped():
+                    break
                 nav.raise_if_failed()
+                text = getattr(nav, "note", lambda: None)()
             except NavigationError as error:
+                kind = chassis_trouble(error)
+                if kind:                                # wait for the chassis to recover, then go on with this leg
+                    self.navigating = False
+                    outcome = self.wait_for_chassis(destination, "undock" if undock else destination, error, kind)
+                    if outcome == "arrived":
+                        break
+                    self.navigating = True; begin = time.monotonic()
+                    if outcome == "restart":
+                        leg["resumed"] = leg.get("resumed", 0) + 1
+                        logging.warning("底盘已恢复，重新执行这一段: %s（第 %d 次）", destination, leg["resumed"])
+                        self._restart_leg(destination, undock)
+                    continue
                 # an object in the way (the chassis waited BLOCK_WAIT s for it, standing still): keep waiting where
                 # we are and retry by ourselves until it is gone - no Enter (2026-11-18/19: a basket left on the
                 # belt; the operator had to clear it and press Enter).  Ctrl-C stops as always.
@@ -456,7 +550,6 @@ class Trial:
                 self.navigating = True; begin = time.monotonic()
                 nav.start(destination)
                 continue
-            text = getattr(nav, "note", lambda: None)()
             if text and text != note:
                 logging.info("底盘: %s", text)          # e.g. WAITING: ... blocked ... waiting for it to clear
             note = text

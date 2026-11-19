@@ -74,6 +74,62 @@ class BlockedOnceNav(FakeNav):
         return self.count > 2 and (self.active != "D" or self.blocked)
 
 
+class VendorDownNav(FakeNav):
+    """On the way to D the vendor chassis programs stop: the job fails, the chassis watchdog restarts them and
+    reports ok (checked after the failure); the leg runs again and arrives."""
+    HEALTH = [{"state": "ok", "ok_since": 50, "t": 100}, {"state": "restarting", "ok_since": 50, "t": 105},
+              {"state": "relocating", "ok_since": 50, "t": 130}, {"state": "ok", "ok_since": 150, "t": 150}]
+
+    def __init__(self, **kw):
+        super().__init__(**kw); self.failed, self.health = False, list(self.HEALTH)
+
+    def raise_if_failed(self):
+        if self.active == "D" and not self.failed and self.count > 1:
+            self.failed = True
+            raise NavigationError("ABORT: VENDOR DOWN: the vendor chassis programs stopped (driver_node) - restarting")
+
+    def is_arrived_and_stopped(self):
+        self.count += 1
+        return self.count > 2 and (self.active != "D" or (self.failed and self.health == []))
+
+    def job_status(self):
+        if self.active == "D" and self.failed and self.health:
+            return {"state": "failed", "job": "D", "error": "ABORT: VENDOR DOWN", "t": 101}
+        return super().job_status()
+
+    def chassis_health(self):
+        h = self.health.pop(0) if len(self.health) > 1 else self.health.pop() if self.health else {"state": "ok", "ok_since": 150}
+        FakeNav.log.append(("health", h["state"])); return h
+
+
+class NoWatchdogNav(VendorDownNav):
+    def chassis_health(self):
+        return {"state": "absent"}
+
+
+class LinkLostNav(FakeNav):
+    """No status for 60 s on the way to D (eth1 down); the link comes back while the job is still running."""
+    def __init__(self, **kw):
+        super().__init__(**kw); self.lost = 0
+
+    def raise_if_failed(self):
+        if self.active == "D" and self.lost == 0 and self.count > 1:
+            self.lost = 1
+            raise NavigationError("底盘导航桥状态超时（ROS 与 ssh 都已 60 s 无应答）")
+
+    def job_status(self):
+        if self.active == "D" and self.lost == 1:
+            self.lost = 2
+            raise NavigationError("底盘导航桥状态超时")                 # first poll: still unreachable
+        if self.active == "D" and self.lost == 2:
+            self.lost = 3
+            return {"state": "running", "job": "D"}
+        return super().job_status()
+
+    def chassis_health(self):
+        return {"state": "ok", "ok_since": 1}
+
+
 class BlockedLongNav(FakeNav):
     """A basket left on the belt: the docking at D ends BLOCKED 7 times in a row (more than the old 5 retries)."""
     TIMES = 7
@@ -443,6 +499,27 @@ class RunnerTests(unittest.TestCase):
             code, report = self.run_trial(nav_cls=BlockedLongNav)
         self.assertEqual(code, 0)
         self.assertEqual([e for e in FakeNav.log if e[0] == "start"].count(("start", "D")), 1 + BlockedLongNav.TIMES)
+
+    def test_vendor_programs_stopping_on_the_way_is_waited_out_and_the_leg_redone(self):
+        with mock.patch.object(runner.time, "sleep", lambda s: None):
+            code, report = self.run_trial(nav_cls=VendorDownNav)
+        self.assertEqual(code, 0)
+        starts = [e for e in FakeNav.log if e[0] == "start"]
+        self.assertEqual(starts, [("start", "D"), ("start", "D"), ("start", "undock"), ("start", "T")])
+        self.assertIn(("health", "restarting"), FakeNav.log)          # waited through the recovery
+        d = [l for l in report["metadata"]["navigation_legs"] if l["destination"] == "D"][0]
+        self.assertEqual(d.get("resumed"), 1)
+
+    def test_without_a_chassis_watchdog_the_old_failure_stays(self):
+        with mock.patch.object(runner.time, "sleep", lambda s: None):
+            code, report = self.run_trial(nav_cls=NoWatchdogNav)
+        self.assertEqual(code, 1)
+
+    def test_link_back_with_the_job_still_running_is_followed_not_restarted(self):
+        with mock.patch.object(runner.time, "sleep", lambda s: None):
+            code, report = self.run_trial(nav_cls=LinkLostNav)
+        self.assertEqual(code, 0)
+        self.assertEqual([e for e in FakeNav.log if e[0] == "start"].count(("start", "D")), 1)
 
     def test_other_docking_failures_still_stop(self):
         code, report = self.run_trial(fail_on="D")

@@ -6,7 +6,8 @@ system with STANDARD messages only (no vendor message packages needed on the cli
                                        cmds: goto (station; gap, via, jitter optional) | undock | stop |
                                              tune (station, key, value) | selfscan | check (station)
   /gento_dock/status  std_msgs/String  JSON, 2 Hz, transient-local (late joiners get the last one):
-                      {"job": {...job_status.json...}, "ack": {"id", "ok", "out"}, "pose": [x, y, yaw_deg], "t": ...}
+                      {"job": {...job_status.json...}, "ack": {"id", "ok", "out"}, "pose": [x, y, yaw_deg], "t": ...,
+                       "vendor": {...vendor_watchdog.json...} or null when the watchdog is not installed}
 
 Every motion job is still run by run.sh / job_wrap.py exactly like from gento.ps1 (detached, one at a time).
 """
@@ -20,6 +21,7 @@ from slam.msg import LocationData
 HERE = os.path.dirname(os.path.abspath(__file__))
 RUN = ['bash', os.path.join(HERE, 'run.sh')]
 JS, PIDF = os.path.join(HERE, 'job_status.json'), os.path.join(HERE, 'run.pid')
+WATCHDOG = os.path.join(HERE, 'vendor_watchdog.json')
 
 
 def read_job():
@@ -45,7 +47,7 @@ class Bridge(Node):
         self.pub = self.create_publisher(String, '/gento_dock/status', q)
         self.create_subscription(String, '/gento_dock/cmd', self.on_cmd, QoSProfile(depth=10, reliability=ReliabilityPolicy.RELIABLE))
         self.create_subscription(LocationData, 'slam/LocationData', self.on_pose, qos_profile_sensor_data)
-        self.ack = None; self.pose = None; self.job = {'state': 'idle'}; self.lock = threading.Lock()
+        self.ack = None; self.pose = None; self.job = {'state': 'idle'}; self.vendor = None; self.lock = threading.Lock()
         self.create_timer(0.5, self.publish)
         threading.Thread(target=self.poll_job, daemon=True).start()
 
@@ -61,6 +63,11 @@ class Bridge(Node):
                 self.job = read_job()
             except Exception as e:
                 self.job = {'state': 'unknown', 'error': str(e)}
+            try:                                    # the vendor watchdog's state: the Orin waits for its recovery
+                with open(WATCHDOG) as fh:
+                    self.vendor = json.load(fh)
+            except (OSError, ValueError):
+                self.vendor = None
             time.sleep(0.5)
 
     def on_cmd(self, msg):
@@ -97,7 +104,8 @@ class Bridge(Node):
         threading.Thread(target=run, daemon=True).start()
 
     def publish(self):
-        self.pub.publish(String(data=json.dumps({'job': self.job, 'ack': self.ack, 'pose': self.pose, 't': time.time()})))
+        self.pub.publish(String(data=json.dumps({'job': self.job, 'ack': self.ack, 'pose': self.pose, 't': time.time(),
+                                                 'vendor': self.vendor})))
 
 
 def main():

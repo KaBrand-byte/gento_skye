@@ -181,6 +181,29 @@ class GentoNavigation:
         lines = self._ssh("job-status").strip().splitlines()
         return json.loads(lines[-1]) if lines else {"state": "idle"}
 
+    def chassis_health(self):
+        """State of the chassis vendor watchdog (vendor_watchdog.py): {"state": ok|restarting|relocating|
+        relocate_failed|gave_up|down|booting, "ok_since": chassis epoch, "event", ...}; {"state": "absent"} when
+        it is not installed; None when the chassis cannot be reached right now."""
+        if self.transport == "ros" and self._status is not None \
+                and time.monotonic() - self._status_at <= self.status_timeout and "vendor" in self._status:
+            return self._status.get("vendor") or {"state": "absent"}
+        now = time.monotonic()
+        if now - getattr(self, "_health_tried", 0.0) < 2.0:
+            return getattr(self, "_health", None)
+        self._health_tried = now
+        target = self.fallback_ssh if self.transport == "ros" else self.ssh_target
+        if not target:
+            return None
+        try:
+            done = subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=3", target,
+                                   "cat ~/gento_dock/vendor_watchdog.json 2>/dev/null || echo '{\"state\": \"absent\"}'"],
+                                  capture_output=True, text=True, timeout=8)
+            self._health = json.loads(done.stdout.strip().splitlines()[-1]) if done.returncode == 0 else None
+        except (subprocess.TimeoutExpired, ValueError, IndexError, OSError):
+            self._health = None
+        return self._health
+
     def pose(self):
         """Map pose [x_m, y_m, yaw_deg] reported by the bridge (ROS transport only)."""
         return (self._status or {}).get("pose")

@@ -57,6 +57,11 @@ def gather_system():
         f['job'] = json.load(open(os.path.join(HERE, 'job_status.json'))).get('state')
     except (OSError, ValueError):
         f['job'] = 'idle'
+    f['watchdog_service'] = sh('systemctl is-active gento-vendor-watchdog') or 'unknown'
+    try:
+        f['watchdog'] = json.load(open(os.path.join(HERE, 'vendor_watchdog.json')))
+    except (OSError, ValueError):
+        f['watchdog'] = None
     return f
 
 
@@ -162,6 +167,25 @@ def evaluate(f):
         add('ok', '导航桥在运行')
     if f.get('job') == 'running':
         add('warn', '底盘上有作业正在运行', '等它结束，或 gento stop')
+    w, ws = f.get('watchdog') or {}, f.get('watchdog_service')
+    if ws is not None and ws != 'active':
+        add('warn', '自动看护 gento-vendor-watchdog 没在运行（%s）：厂家程序停了不会自动恢复' % ws,
+            '在底盘上 bash ~/gento_dock/install.sh 或 sudo systemctl restart gento-vendor-watchdog')
+    elif w:
+        st, ev = w.get('state'), w.get('event') or ''
+        if st == 'gave_up':
+            add('fail', '自动看护已放弃：%s' % ev, '整机断电重启')
+        elif st == 'relocate_failed':
+            add('fail', '厂家程序已自动重启，但自动重定位没成功', 'gento relocate；不行就在厂家网页上重定位')
+        elif st in ('restarting', 'relocating', 'down'):
+            add('warn', '自动看护正在恢复厂家程序：%s' % ev, '等 2～3 分钟再 gento doctor')
+        else:
+            add('ok', '自动看护在运行（%s）' % st)
+        n = len(w.get('restarts') or [])
+        if n:
+            ago = (w.get('t') or 0) - w['restarts'][-1]
+            add('warn', '本次开机以来自动重启过厂家程序 %d 次（最近一次约 %.0f 分钟前）' % (n, ago / 60.0),
+                '看底盘 ~/gento_dock/watchdog.log；次数多就报厂家')
     return out
 
 
