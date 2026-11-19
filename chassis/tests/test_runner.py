@@ -74,6 +74,23 @@ class BlockedOnceNav(FakeNav):
         return self.count > 2 and (self.active != "D" or self.blocked)
 
 
+class BlockedLongNav(FakeNav):
+    """A basket left on the belt: the docking at D ends BLOCKED 7 times in a row (more than the old 5 retries)."""
+    TIMES = 7
+
+    def __init__(self, **kw):
+        super().__init__(**kw); self.blocks = 0
+
+    def raise_if_failed(self):
+        if self.active == "D" and self.blocks < self.TIMES and self.count > 1:
+            self.blocks += 1
+            raise NavigationError("ABORT: BLOCKED: straight approach on the station line blocked by obstacle {} - still there after 30 s")
+
+    def is_arrived_and_stopped(self):
+        self.count += 1
+        return self.count > 2 and (self.active != "D" or self.blocks >= self.TIMES)
+
+
 @dataclass
 class FakeGripperConfig:
     def action_positions(self, action, side):
@@ -414,14 +431,21 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(report["metadata"]["return_status"], "failed")
         self.assertIn(("stop", "undock"), FakeNav.log)
 
-    def test_blocked_docking_is_retried_after_enter_on_a_terminal(self):
-        code, report = self.run_trial(nav_cls=BlockedOnceNav)
+    def test_blocked_docking_waits_and_retries_by_itself(self):
+        with mock.patch.object(runner, "BLOCK_PAUSE", 0.0),              mock.patch.object(runner, "wait_for_start", side_effect=AssertionError("no Enter")):
+            code, report = self.run_trial(nav_cls=BlockedOnceNav, tty=False)
         self.assertEqual(code, 0)
         self.assertEqual([e for e in FakeNav.log if e[0] == "start"],
                          [("start", "D"), ("start", "D"), ("start", "undock"), ("start", "T")])
 
-    def test_blocked_docking_without_a_terminal_fails(self):
-        code, report = self.run_trial(nav_cls=BlockedOnceNav, tty=False)
+    def test_long_blockage_is_waited_out(self):
+        with mock.patch.object(runner, "BLOCK_PAUSE", 0.0):
+            code, report = self.run_trial(nav_cls=BlockedLongNav)
+        self.assertEqual(code, 0)
+        self.assertEqual([e for e in FakeNav.log if e[0] == "start"].count(("start", "D")), 1 + BlockedLongNav.TIMES)
+
+    def test_other_docking_failures_still_stop(self):
+        code, report = self.run_trial(fail_on="D")
         self.assertEqual(code, 1)
 
     def test_failure_at_the_place_station_stops_chassis_and_arms_without_placing(self):

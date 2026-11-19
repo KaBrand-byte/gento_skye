@@ -41,7 +41,7 @@ import time
 ROOT = Path(__file__).resolve().parents[2]
 LINK_RELEASE_S = 2.0
 RANDOM_ROUTE_JITTER = 0.08  # m: --random-route, random spot within this of the taught safe points
-BLOCK_RETRIES = 5          # an object blocking the docking: ask to clear it and retry this often
+BLOCK_PAUSE = 2.0          # s: docking blocked (the chassis already waited 30 s): pause, then check again
 MAX_LIFT_ASSIST_MM = 60.0  # at most this much of the place descent is done by the lift instead of the arms
 PLACE_DOWN_MM = 135.0      # total place descent (arms + lift).  Basket since 2026-11-17: the tray's 185 mm
                            # (arms 135 + lift 50) pressed the basket into the belt and pushed the arms up -> 5 cm less
@@ -429,7 +429,7 @@ class Trial:
         logging.info("导航开始: %s", destination)
         self.navigating = True
         nav.start_undock() if undock else nav.start(destination)
-        retries, note = 0, None
+        retries, note, blocked_since = 0, None, None
         while True:
             seq.checked_feedback()                      # stop request + arm/lift/waist feedback unchanged
             if nav.is_arrived_and_stopped():
@@ -437,18 +437,22 @@ class Trial:
             try:
                 nav.raise_if_failed()
             except NavigationError as error:
-                # an object in the way (the chassis already waited for it to go): ask to clear it, then retry
-                if undock or "BLOCKED" not in str(error) or retries >= BLOCK_RETRIES or not sys.stdin.isatty():
+                # an object in the way (the chassis waited BLOCK_WAIT s for it, standing still): keep waiting where
+                # we are and retry by ourselves until it is gone - no Enter (2026-11-18/19: a basket left on the
+                # belt; the operator had to clear it and press Enter).  Ctrl-C stops as always.
+                if undock or "BLOCKED" not in str(error):
                     raise
                 retries += 1
+                blocked_since = blocked_since or begin
                 self.navigating = False
-                bar = "=" * 60
-                print(chr(7)); print(bar)
-                print(f"  去 {destination} 的路上被挡住（底盘已等待）：{error}")
-                print(f"  清除障碍后按 Enter 重试（第 {retries}/{BLOCK_RETRIES} 次）；Ctrl-C 停止。")
-                print(bar, flush=True)
-                wait_for_start(seq)
-                logging.info("重试导航: %s", destination)
+                waited = time.monotonic() - blocked_since
+                if retries == 1:
+                    print(chr(7), flush=True)
+                logging.warning("去 %s 被挡住，原地等待障碍物离开后自动继续（已等 %.0f s，第 %d 次重查；Ctrl-C 停止）：%s",
+                                destination, waited, retries, error)
+                pause = time.monotonic()
+                while time.monotonic() - pause < BLOCK_PAUSE:
+                    seq.checked_feedback(); time.sleep(self.args.poll)
                 self.navigating = True; begin = time.monotonic()
                 nav.start(destination)
                 continue
